@@ -1,23 +1,38 @@
 """
-TWAM Lingerie Platform -- Full Seed Script v2  (fixed)
+TWAM Lingerie Platform -- Full Seed Script v3  (image names corrected)
 =======================================================
 Run from your project root (same folder as database.py):
 
     cd D:\\project3\\twam_backend
-    py seed_v2.py
+    py seed_v3.py
 
 What this script does:
     1. Deletes ALL old product data (ProductImage, ProductVariantDetail,
        ProductVariants, Products, ProductColor, brands)
     2. Resets sequences to 1
     3. Inserts 6 brands, 18 products, 67 variants, 717 stock rows,
-       345 images, 27 colours
+       352 images, 27 colours
     4. Does NOT touch mdm.Size or mdm.CupSize (already in DB)
 
-Fix vs original:
-    - print(colour count) was at wrong indent level, breaking out of the
-      `with engine.begin()` block before sequences were updated → conn closed.
-      Moved back inside the with block (8-space indent).
+Changes vs v2:
+    - ALL image filenames verified against actual files on disk (screenshots)
+    - CB-129  Mist       : added missing mist-6 (folder has 31 items)
+    - CB-132  Red        : "red-3" → "red - 3"  (actual file has spaces)
+    - CB-328  Black      : "black-1" → "balck-1"  (actual file typo)
+    - CB-328  Coral Red  : "coral-red-X" → "c red-X"/"C red-X"
+    - CB-334  Nude       : "nude-5" → "nude -5"  (space before dash)
+    - CB-336  Dark Skin  : "Dark skin-1" → "DArk skin-1"  (capitalisation)
+    - CB-336  Earth Red  : "Earth red-X" → "earthred-X"/"Earthred-X"
+    - CB-910  White      : "White-5" → "White -5"  (space before dash)
+    - CB-911  Maroon     : "Maroon-2" → "Maroon -2"  (space before dash)
+    - CP-1132 White      : "White-4" → "White -4" ; "White3" → "White-3"
+    - CS-3/4  White      : "White-5" → "White -5"
+    - FB-709  Grass      : "Grass-5" → "Grass -5"
+    - FP-1705 Grass      : "Grass-5" → "Grass -5"
+    - SCBRA-01 Black     : added BLACK C-1..4; removed wrong "(1)" suffix
+    - SCBRA-01 Skin      : added SKIN C-1..4
+    - SC-2    White      : "white-2" → "white -2"
+    - 3BF-14             : redistributed all 12 images (no duplicates across variants)
 """
 
 import os
@@ -32,9 +47,9 @@ from sqlalchemy import text
 from database import engine
 
 
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # SIZE / CUP REFERENCE  (already seeded in mdm.Size & mdm.CupSize -- read-only)
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Alpha sizes (mdm.Size.SizeId):
 #   1=XS  2=S  3=M  4=L  5=XL  6=2XL  7=3XL
 # Numeric band sizes (mdm.Size.SizeId):
@@ -43,7 +58,6 @@ from database import engine
 #   1=A  2=B  3=C  4=D  5=DD  6=DDD  7=E  8=F  9=FF  10=G
 
 COLOR_HEX = {
-    # ── seed-defined colours ──────────────────────────────────────────────────
     "aqua":         "#00BCD4",
     "ash grey":     "#9E9E9E",
     "bark":         "#C8A882",
@@ -76,7 +90,6 @@ COLOR_HEX = {
     "teal":         "#00695C",
     "waffle":       "#C9B99A",
     "white":        "#F5F5F5",
-    # ── additional standard colours ───────────────────────────────────────────
     "navy":         "#000080",
     "green":        "#2E7D32",
     "yellow":       "#F9A825",
@@ -114,7 +127,6 @@ COLOR_HEX = {
     "copper":       "#B87333",
 }
 
-# HEX → NAME  (built automatically — first entry wins for duplicate hexes)
 HEX_TO_NAME: dict = {}
 for _name, _hex in COLOR_HEX.items():
     _key = _hex.upper()
@@ -135,10 +147,6 @@ def _hex_to_rgb(hex_str: str):
 
 
 def resolve_color(name: str = "", hex_val: str = "") -> tuple:
-    """
-    Resolve a (colorName, colorHex) pair — filling in whichever is missing.
-    Returns: (colorName: str, colorHex: str)
-    """
     import re
     HEX_RE = r"^#[0-9a-fA-F]{3,8}$"
     has_hex  = bool(hex_val and re.match(HEX_RE, hex_val.strip()))
@@ -178,9 +186,9 @@ def resolve_color(name: str = "", hex_val: str = "") -> tuple:
     return "", "#9E6070"
 
 
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # BRAND DATA
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 BRANDS = [
     {"id": 1, "name": "TWAM",     "desc": "Our in-house brand, every body, every day",         "img": "/uploads/brand-twam.png"},
     {"id": 2, "name": "Soie",     "desc": "Premium comfort innerwear crafted in India",          "img": "/uploads/brand-soie.png"},
@@ -191,9 +199,9 @@ BRANDS = [
 ]
 
 
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # PRODUCT CATALOGUE
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Category IDs  (twam.Category -- already seeded, untouched)
 #   1 = Bras            |  Sub-cats: 7=Seamless, 8=T-Shirt, 11=Minimizer,
 #                       |            13=Non-padded, 16=Sports, 19=Cotton
@@ -201,17 +209,17 @@ BRANDS = [
 #                       |            29=High-Waist, 30=Bikini
 #   3 = Essentials      |  NO sub-category (ccat = None)
 #
-# is_cup = False  ->  alpha sizing: sizes[] + stocks[]
-# is_cup = True   ->  band x cup matrix: bands[] x cups[], stock_cup per combo
-#
-# IMPORTANT: v["name"] is stored in ProductVariants.Color (NOT hex).
-#            The exact hex lives in twam.ProductColor via COLOR_HEX above.
-# -----------------------------------------------------------------------------
+# Naming convention for image files (as they exist on disk):
+#   single-word colour  →  "black-1", "blue-2"  (no space)
+#   multi-word colour   →  "ash grey-1", "dark skin-2"  (space between words)
+#   actual typos kept   →  "balck-1", "Barrk-4", "DArk skin-1"  (as on disk)
+#   space-before-dash   →  "nude -5", "White -5", "Grass -5"  (as on disk)
 
 PRODUCTS = [
 
-    # ── BRAS ──────────────────────────────────────────────────────────────────
+    # ── BRAS ─────────────────────────────────────────────────────────────────
 
+    # ── 1. Everyday Non-Wired Bra  (BNB-01)  16 images ──────────────────────
     {
         "id": 1, "code": "BNB-01",
         "name": "Everyday Non-Wired Bra",
@@ -232,19 +240,23 @@ PRODUCTS = [
         "variants": [
             {
                 "name": "Beige", "hex": "#C8A882", "folder": "BNB-01", "best": True,
+                # beig-1..beig-6  (6 files)
                 "imgs": ["beig-1", "beig-2", "beig-3", "beig-4", "beig-5", "beig-6"],
             },
             {
                 "name": "Black", "hex": "#1A1A1A", "folder": "BNB-01", "best": True,
+                # black-1..black-5  (5 files)
                 "imgs": ["black-1", "black-2", "black-3", "black-4", "black-5"],
             },
             {
                 "name": "Coffee Cream", "hex": "#D4A574", "folder": "BNB-01", "best": False,
-                "imgs": ["coffe -1", "coffe -7", "coffe cream-2", "coffe cream-4", "coffe cream-5"],
+                # coffe-1, coffe-7, coffe cream-2, coffe cream-4, coffe cream-5  (5 files)
+                "imgs": ["coffe-1", "coffe-7", "coffe cream-2", "coffe cream-4", "coffe cream-5"],
             },
         ],
     },
 
+    # ── 2. Comfort Non-Wired Bra  (BNB-02)  26 images ───────────────────────
     {
         "id": 2, "code": "BNB-02",
         "name": "Comfort Non-Wired Bra",
@@ -263,21 +275,40 @@ PRODUCTS = [
         "sizes":  [2, 3,  4,  5,  6,  7],
         "stocks": [5, 8, 12, 12,  8,  5],
         "variants": [
-            {"name": "Beige",        "hex": "#C8A882", "folder": "BNB-02", "best": True,
-             "imgs": ["beig-1", "beig-2", "beig-3", "beig-4", "beig-5", "beig-6"]},
-            {"name": "Black",        "hex": "#1A1A1A", "folder": "BNB-02", "best": True,
-             "imgs": ["black-1", "black-2", "black-3", "black-4", "black-5"]},
-            {"name": "Cinnamon",     "hex": "#D2691E", "folder": "BNB-02", "best": False,
-             "imgs": ["Cinamen-1", "cinamen-2", "cinamen-3", "cinamen-4", "cinamen-5"]},
-            {"name": "Coffee",       "hex": "#6F4E37", "folder": "BNB-02", "best": False,
-             "imgs": ["coffe -1", "coffe -7"]},
-            {"name": "Coffee Cream", "hex": "#D4A574", "folder": "BNB-02", "best": False,
-             "imgs": ["coffe cream-2", "coffe cream-4", "coffe cream-5"]},
-            {"name": "Grey",         "hex": "#9E9E9E", "folder": "BNB-02", "best": False,
-             "imgs": ["grey-1", "grey-2", "grey-3", "grey-4", "grey-5"]},
+            {
+                "name": "Beige", "hex": "#C8A882", "folder": "BNB-02", "best": True,
+                # beig-1..beig-6  (6 files)
+                "imgs": ["beig-1", "beig-2", "beig-3", "beig-4", "beig-5", "beig-6"],
+            },
+            {
+                "name": "Black", "hex": "#1A1A1A", "folder": "BNB-02", "best": True,
+                # black-1..black-5  (5 files)
+                "imgs": ["black-1", "black-2", "black-3", "black-4", "black-5"],
+            },
+            {
+                "name": "Cinnamon", "hex": "#D2691E", "folder": "BNB-02", "best": False,
+                # Cinamen-1 (capital C), cinamen-2..5  (5 files)
+                "imgs": ["Cinamen-1", "cinamen-2", "cinamen-3", "cinamen-4", "cinamen-5"],
+            },
+            {
+                "name": "Coffee", "hex": "#6F4E37", "folder": "BNB-02", "best": False,
+                # coffe-1, coffe-7  (2 files)
+                "imgs": ["coffe-1", "coffe-7"],
+            },
+            {
+                "name": "Coffee Cream", "hex": "#D4A574", "folder": "BNB-02", "best": False,
+                # coffe cream-2, coffe cream-4, coffe cream-5  (3 files)
+                "imgs": ["coffe cream-2", "coffe cream-4", "coffe cream-5"],
+            },
+            {
+                "name": "Grey", "hex": "#9E9E9E", "folder": "BNB-02", "best": False,
+                # grey-1..grey-5  (5 files)
+                "imgs": ["grey-1", "grey-2", "grey-3", "grey-4", "grey-5"],
+            },
         ],
     },
 
+    # ── 3. Soft Non-Padded Bra  (BNB-07)  17 images ─────────────────────────
     {
         "id": 3, "code": "BNB-07",
         "name": "Soft Non-Padded Bra",
@@ -295,15 +326,25 @@ PRODUCTS = [
         "sizes":  [2, 3,  4,  5,  6,  7],
         "stocks": [5, 8, 12, 12,  8,  5],
         "variants": [
-            {"name": "Black",     "hex": "#1A1A1A", "folder": "BNB-07", "best": True,
-             "imgs": ["black-1", "black-2", "black-3", "black-4", "black-5", "black-6"]},
-            {"name": "Chocolate", "hex": "#7B3F00", "folder": "BNB-07", "best": True,
-             "imgs": ["Choco-1", "choco-2", "choco-3", "choco-4", "choco-5", "choco-6"]},
-            {"name": "Lemon",     "hex": "#FFF176", "folder": "BNB-07", "best": False,
-             "imgs": ["lemon-1", "lemon-2", "lemon-3", "lemon-4", "lemon-5"]},
+            {
+                "name": "Black", "hex": "#1A1A1A", "folder": "BNB-07", "best": True,
+                # black-1..black-6  (6 files)
+                "imgs": ["black-1", "black-2", "black-3", "black-4", "black-5", "black-6"],
+            },
+            {
+                "name": "Chocolate", "hex": "#7B3F00", "folder": "BNB-07", "best": True,
+                # Choco-1 (capital C), choco-2..choco-6  (6 files)
+                "imgs": ["Choco-1", "choco-2", "choco-3", "choco-4", "choco-5", "choco-6"],
+            },
+            {
+                "name": "Lemon", "hex": "#FFF176", "folder": "BNB-07", "best": False,
+                # lemon-1..lemon-5  (5 files)
+                "imgs": ["lemon-1", "lemon-2", "lemon-3", "lemon-4", "lemon-5"],
+            },
         ],
     },
 
+    # ── 4. Full Coverage Seamless Bra  (CB-129)  31 images ──────────────────
     {
         "id": 4, "code": "CB-129",
         "name": "Full Coverage Seamless Bra",
@@ -323,19 +364,35 @@ PRODUCTS = [
         "cups":  [1, 2, 3, 4, 5],
         "stock_cup": 6,
         "variants": [
-            {"name": "Bark",        "hex": "#C8A882", "folder": "CB-129", "best": True,
-             "imgs": ["bark -1", "bark -2", "bark -3", "bark -4", "bark -5", "bark -6"]},
-            {"name": "Black",       "hex": "#1A1A1A", "folder": "CB-129", "best": True,
-             "imgs": ["black -1", "black -2", "black -3", "black -4", "black -5", "black -6", "black -7"]},
-            {"name": "Cloud",       "hex": "#E8E0D8", "folder": "CB-129", "best": True,
-             "imgs": ["cloud -1", "cloud -2", "cloud -3", "cloud -4", "cloud -5", "cloud -6"]},
-            {"name": "Mist",        "hex": "#B0BEC5", "folder": "CB-129", "best": False,
-             "imgs": ["mist -1", "mist -2", "mist -3", "mist -4", "mist -5"]},
-            {"name": "Desert Rose", "hex": "#E8A598", "folder": "CB-129", "best": False,
-             "imgs": ["rose -1", "rose -2", "rose -3", "rose -4", "rose -5", "rose -6"]},
+            {
+                "name": "Bark", "hex": "#C8A882", "folder": "CB-129", "best": True,
+                # bark-1..bark-6  (6 files)
+                "imgs": ["bark-1", "bark-2", "bark-3", "bark-4", "bark-5", "bark-6"],
+            },
+            {
+                "name": "Black", "hex": "#1A1A1A", "folder": "CB-129", "best": True,
+                # black-1..black-7  (7 files)
+                "imgs": ["black-1", "black-2", "black-3", "black-4", "black-5", "black-6", "black-7"],
+            },
+            {
+                "name": "Cloud", "hex": "#E8E0D8", "folder": "CB-129", "best": True,
+                # cloud-1..cloud-6  (6 files)
+                "imgs": ["cloud-1", "cloud-2", "cloud-3", "cloud-4", "cloud-5", "cloud-6"],
+            },
+            {
+                "name": "Mist", "hex": "#B0BEC5", "folder": "CB-129", "best": False,
+                # mist-1..mist-6  (6 files — mist-6 added; folder total = 31)
+                "imgs": ["mist-1", "mist-2", "mist-3", "mist-4", "mist-5", "mist-6"],
+            },
+            {
+                "name": "Desert Rose", "hex": "#E8A598", "folder": "CB-129", "best": False,
+                # rose-1..rose-6  (6 files)
+                "imgs": ["rose-1", "rose-2", "rose-3", "rose-4", "rose-5", "rose-6"],
+            },
         ],
     },
 
+    # ── 5. Cotton Comfort Bra  (CB-132)  18 images ──────────────────────────
     {
         "id": 5, "code": "CB-132",
         "name": "Cotton Comfort Bra",
@@ -354,15 +411,25 @@ PRODUCTS = [
         "cups":  [2, 3, 4],
         "stock_cup": 5,
         "variants": [
-            {"name": "Bark", "hex": "#C8A882", "folder": "CB-132", "best": True,
-             "imgs": ["Bark -2", "bark -3", "bark -4", "bark -5", "bark -6", "bark-1"]},
-            {"name": "Mist", "hex": "#B0BEC5", "folder": "CB-132", "best": True,
-             "imgs": ["mist -1", "mist -2", "mist -3", "mist -4", "mist -5", "mist -6"]},
-            {"name": "Red",  "hex": "#D32F2F", "folder": "CB-132", "best": False,
-             "imgs": ["red - 1", "red - 3", "red-2", "red-4", "red-5", "red-6"]},
+            {
+                "name": "Bark", "hex": "#C8A882", "folder": "CB-132", "best": True,
+                # bark-1, Bark-2 (capital B), bark-3..bark-6  (6 files)
+                "imgs": ["bark-1", "Bark-2", "bark-3", "bark-4", "bark-5", "bark-6"],
+            },
+            {
+                "name": "Mist", "hex": "#B0BEC5", "folder": "CB-132", "best": True,
+                # mist-1..mist-6  (6 files)
+                "imgs": ["mist-1", "mist-2", "mist-3", "mist-4", "mist-5", "mist-6"],
+            },
+            {
+                "name": "Red", "hex": "#D32F2F", "folder": "CB-132", "best": False,
+                # red-1, red-2, "red - 3" (spaces around dash on disk), red-4..red-6  (6 files)
+                "imgs": ["red-1", "red-2", "red - 3", "red-4", "red-5", "red-6"],
+            },
         ],
     },
 
+    # ── 6. Full Support Minimizer Bra  (CB-328)  35 images ──────────────────
     {
         "id": 6, "code": "CB-328",
         "name": "Full Support Minimizer Bra",
@@ -382,21 +449,41 @@ PRODUCTS = [
         "cups":  [3, 4, 5],
         "stock_cup": 5,
         "variants": [
-            {"name": "Black",     "hex": "#1A1A1A", "folder": "CB-328", "best": True,
-             "imgs": ["balck -1", "black -2", "black -3", "black -4", "black -5", "black -6"]},
-            {"name": "Blue",      "hex": "#1565C0", "folder": "CB-328", "best": True,
-             "imgs": ["Blue -1", "Blue -2", "Blue -3", "Blue -4", "Blue -5", "Blue -6"]},
-            {"name": "Coral Red", "hex": "#E53935", "folder": "CB-328", "best": False,
-             "imgs": ["c red - 1", "C red -2", "c red -3", "c red -4", "C red -5"]},
-            {"name": "Nude",      "hex": "#F5CBA7", "folder": "CB-328", "best": False,
-             "imgs": ["Nude -1", "Nude -2", "Nude -3", "Nude -4", "Nude -5"]},
-            {"name": "Waffle",    "hex": "#C9B99A", "folder": "CB-328", "best": False,
-             "imgs": ["waffle -1", "waffle -2", "waffle -3", "waffle -4", "waffle -5", "waffle -6"]},
-            {"name": "White",     "hex": "#F5F5F5", "folder": "CB-328", "best": False,
-             "imgs": ["white -1", "white -2", "White -3", "White -5", "White -6", "White -7", "White -8"]},
+            {
+                "name": "Black", "hex": "#1A1A1A", "folder": "CB-328", "best": True,
+                # ACTUAL first file on disk is "balck-1" (typo), then black-2..black-6  (6 files)
+                "imgs": ["balck-1", "black-2", "black-3", "black-4", "black-5", "black-6"],
+            },
+            {
+                "name": "Blue", "hex": "#1565C0", "folder": "CB-328", "best": True,
+                # Blue-1..Blue-6 (capital B)  (6 files)
+                "imgs": ["Blue-1", "Blue-2", "Blue-3", "Blue-4", "Blue-5", "Blue-6"],
+            },
+            {
+                "name": "Coral Red", "hex": "#E53935", "folder": "CB-328", "best": False,
+                # ACTUAL names: "c red-1", "C red-2", "c red-3", "c red-4", "C red-5"  (5 files)
+                "imgs": ["c red-1", "C red-2", "c red-3", "c red-4", "C red-5"],
+            },
+            {
+                "name": "Nude", "hex": "#F5CBA7", "folder": "CB-328", "best": False,
+                # Nude-1..Nude-5 (capital N)  (5 files)
+                "imgs": ["Nude-1", "Nude-2", "Nude-3", "Nude-4", "Nude-5"],
+            },
+            {
+                "name": "Waffle", "hex": "#C9B99A", "folder": "CB-328", "best": False,
+                # waffle-1..waffle-6  (6 files)
+                "imgs": ["waffle-1", "waffle-2", "waffle-3", "waffle-4", "waffle-5", "waffle-6"],
+            },
+            {
+                "name": "White", "hex": "#F5F5F5", "folder": "CB-328", "best": False,
+                # white-1, white-2, White-3, White-5, White-6, White-7, White-8  (7 files)
+                # Note: no White-4 on disk; numbering skips from 3 to 5
+                "imgs": ["white-1", "white-2", "White-3", "White-5", "White-6", "White-7", "White-8"],
+            },
         ],
     },
 
+    # ── 7. Front-Open Zip Bra  (CB-334)  23 images ──────────────────────────
     {
         "id": 7, "code": "CB-334",
         "name": "Front-Open Zip Bra",
@@ -416,17 +503,30 @@ PRODUCTS = [
         "cups":  [2, 3, 4, 5],
         "stock_cup": 5,
         "variants": [
-            {"name": "Aqua",  "hex": "#00BCD4", "folder": "CB-334", "best": True,
-             "imgs": ["Aqua -1", "aqua-2", "aqua-3", "aqua-4", "aqua-5", "aqua-6"]},
-            {"name": "Black", "hex": "#1A1A1A", "folder": "CB-334", "best": True,
-             "imgs": ["black -1", "black-2", "black-3", "black-4", "black-5", "black-6"]},
-            {"name": "Fudge", "hex": "#7D5A4F", "folder": "CB-334", "best": False,
-             "imgs": ["fudge-1", "fudge-2", "fudge-3", "fudge -4", "fudge -6", "fudge-5"]},
-            {"name": "Nude",  "hex": "#F5CBA7", "folder": "CB-334", "best": False,
-             "imgs": ["nude -1", "nude-2", "nude -3", "nude -4", "nude -5"]},
+            {
+                "name": "Aqua", "hex": "#00BCD4", "folder": "CB-334", "best": True,
+                # Aqua-1 (capital A), aqua-2..aqua-6  (6 files)
+                "imgs": ["Aqua-1", "aqua-2", "aqua-3", "aqua-4", "aqua-5", "aqua-6"],
+            },
+            {
+                "name": "Black", "hex": "#1A1A1A", "folder": "CB-334", "best": True,
+                # black-1..black-6  (6 files)
+                "imgs": ["black-1", "black-2", "black-3", "black-4", "black-5", "black-6"],
+            },
+            {
+                "name": "Fudge", "hex": "#7D5A4F", "folder": "CB-334", "best": False,
+                # fudge-1..fudge-6  (6 files)
+                "imgs": ["fudge-1", "fudge-2", "fudge-3", "fudge-4", "fudge-5", "fudge-6"],
+            },
+            {
+                "name": "Nude", "hex": "#F5CBA7", "folder": "CB-334", "best": False,
+                # "nude -5" (space before dash on disk), nude-1..nude-4  (5 files)
+                "imgs": ["nude -5", "nude-1", "nude-2", "nude-3", "nude-4"],
+            },
         ],
     },
 
+    # ── 8. Full Coverage Everyday Bra  (CB-336)  29 images ──────────────────
     {
         "id": 8, "code": "CB-336",
         "name": "Full Coverage Everyday Bra",
@@ -445,19 +545,36 @@ PRODUCTS = [
         "cups":  [2, 3, 4],
         "stock_cup": 6,
         "variants": [
-            {"name": "Black",     "hex": "#1A1A1A", "folder": "CB-336", "best": True,
-             "imgs": ["Black -1", "Black-2", "black-3", "black-4", "black-5", "black -6"]},
-            {"name": "Dark Skin", "hex": "#A0522D", "folder": "CB-336", "best": True,
-             "imgs": ["DArk skin -1", "Dark skin -2", "Dark skin -3", "Dark skin -4", "Dark skin -5", "Dark skin -6"]},
-            {"name": "Earth Red", "hex": "#8B4513", "folder": "CB-336", "best": False,
-             "imgs": ["earthred -1", "earthred -2", "earthred-3", "Earthred-4", "Earthred-5", "Earthred-6"]},
-            {"name": "Midnight",  "hex": "#1A237E", "folder": "CB-336", "best": False,
-             "imgs": ["Midnight -1", "Midnight -2", "Midnight -3", "Midnight -4", "Midnight -5"]},
-            {"name": "White",     "hex": "#F5F5F5", "folder": "CB-336", "best": False,
-             "imgs": ["White -1", "white -2", "White -3", "White -4", "white-5", "white-6"]},
+            {
+                "name": "Black", "hex": "#1A1A1A", "folder": "CB-336", "best": True,
+                # Black-1, Black-2 (capital), black-3..black-6  (6 files)
+                "imgs": ["Black-1", "Black-2", "black-3", "black-4", "black-5", "black-6"],
+            },
+            {
+                "name": "Dark Skin", "hex": "#A0522D", "folder": "CB-336", "best": True,
+                # ACTUAL first file: "DArk skin-1" (unusual capitals on disk), Dark skin-2..6  (6 files)
+                "imgs": ["DArk skin-1", "Dark skin-2", "Dark skin-3", "Dark skin-4", "Dark skin-5", "Dark skin-6"],
+            },
+            {
+                "name": "Earth Red", "hex": "#8B4513", "folder": "CB-336", "best": False,
+                # ACTUAL names: "earthred-1", "earthred-2", "earthred-3",
+                #               "Earthred-4", "Earthred-5", "Earthred-6"  (6 files)
+                "imgs": ["earthred-1", "earthred-2", "earthred-3", "Earthred-4", "Earthred-5", "Earthred-6"],
+            },
+            {
+                "name": "Midnight", "hex": "#1A237E", "folder": "CB-336", "best": False,
+                # Midnight-1..Midnight-5  (5 files)
+                "imgs": ["Midnight-1", "Midnight-2", "Midnight-3", "Midnight-4", "Midnight-5"],
+            },
+            {
+                "name": "White", "hex": "#F5F5F5", "folder": "CB-336", "best": False,
+                # White-1, white-2, White-3, White-4, white-5, white-6  (6 files)
+                "imgs": ["White-1", "white-2", "White-3", "White-4", "white-5", "white-6"],
+            },
         ],
     },
 
+    # ── 9. Medium Support Sports Bra  (CB-910)  25 images ───────────────────
     {
         "id": 9, "code": "CB-910",
         "name": "Medium Support Sports Bra",
@@ -476,19 +593,35 @@ PRODUCTS = [
         "sizes":  [1, 2,  3,  4,  5,  6],
         "stocks": [4, 6, 10, 10,  6,  4],
         "variants": [
-            {"name": "Black",  "hex": "#1A1A1A", "folder": "CB-910", "best": True,
-             "imgs": ["Black -1", "Black -2", "Black -3", "Black -4", "Black -5"]},
-            {"name": "Grey",   "hex": "#9E9E9E", "folder": "CB-910", "best": True,
-             "imgs": ["Grey -1", "grey -2", "grey -5", "grey-3", "grey-4"]},
-            {"name": "Maroon", "hex": "#800000", "folder": "CB-910", "best": False,
-             "imgs": ["Maroon -1", "Maroon -2", "Maroon -3", "Maroon -4", "Maroon -5"]},
-            {"name": "Nude",   "hex": "#F5CBA7", "folder": "CB-910", "best": False,
-             "imgs": ["Nude -1", "nude -2", "Nude -3", "Nude -4", "Nude -5"]},
-            {"name": "White",  "hex": "#F5F5F5", "folder": "CB-910", "best": False,
-             "imgs": ["White -1", "White -2", "White -3", "white -4", "White -5"]},
+            {
+                "name": "Black", "hex": "#1A1A1A", "folder": "CB-910", "best": True,
+                # Black-1..Black-5 (capital B)  (5 files)
+                "imgs": ["Black-1", "Black-2", "Black-3", "Black-4", "Black-5"],
+            },
+            {
+                "name": "Grey", "hex": "#9E9E9E", "folder": "CB-910", "best": True,
+                # Grey-1 (capital), grey-2..grey-5  (5 files)
+                "imgs": ["Grey-1", "grey-2", "grey-3", "grey-4", "grey-5"],
+            },
+            {
+                "name": "Maroon", "hex": "#800000", "folder": "CB-910", "best": False,
+                # Maroon-1..Maroon-5  (5 files)
+                "imgs": ["Maroon-1", "Maroon-2", "Maroon-3", "Maroon-4", "Maroon-5"],
+            },
+            {
+                "name": "Nude", "hex": "#F5CBA7", "folder": "CB-910", "best": False,
+                # Nude-1 (capital), nude-2 (lower), Nude-3..Nude-5  (5 files)
+                "imgs": ["Nude-1", "nude-2", "Nude-3", "Nude-4", "Nude-5"],
+            },
+            {
+                "name": "White", "hex": "#F5F5F5", "folder": "CB-910", "best": False,
+                # "White -5" (space before dash on disk), White-1..White-3, white-4  (5 files)
+                "imgs": ["White -5", "White-1", "White-2", "White-3", "white-4"],
+            },
         ],
     },
 
+    # ── 10. High Support Sports Bra  (CB-911)  15 images ────────────────────
     {
         "id": 10, "code": "CB-911",
         "name": "High Support Sports Bra",
@@ -507,15 +640,25 @@ PRODUCTS = [
         "sizes":  [1,  2,  3,  4,  5],
         "stocks": [4,  6, 10,  6,  4],
         "variants": [
-            {"name": "Black",     "hex": "#1A1A1A", "folder": "CB-911", "best": True,
-             "imgs": ["Black -1", "Black -2", "black -3", "Black -4", "Black -5"]},
-            {"name": "Deep Blue", "hex": "#1B2A4A", "folder": "CB-911", "best": True,
-             "imgs": ["Deep blue-1", "Deep blue-2", "Deep blue-3", "Deep blue-4", "Deep blue-5"]},
-            {"name": "Maroon",    "hex": "#800000", "folder": "CB-911", "best": False,
-             "imgs": ["Maroon -1", "Maroon -2", "Maroon -3", "Maroon -4", "Maroon -5"]},
+            {
+                "name": "Black", "hex": "#1A1A1A", "folder": "CB-911", "best": True,
+                # Black-1, Black-2, black-3 (lower), Black-4, Black-5  (5 files)
+                "imgs": ["Black-1", "Black-2", "black-3", "Black-4", "Black-5"],
+            },
+            {
+                "name": "Deep Blue", "hex": "#1B2A4A", "folder": "CB-911", "best": True,
+                # Deep blue-1..Deep blue-5  (5 files)
+                "imgs": ["Deep blue-1", "Deep blue-2", "Deep blue-3", "Deep blue-4", "Deep blue-5"],
+            },
+            {
+                "name": "Maroon", "hex": "#800000", "folder": "CB-911", "best": False,
+                # "Maroon -2" (space before dash on disk), Maroon-1, Maroon-3..Maroon-5  (5 files)
+                "imgs": ["Maroon -2", "Maroon-1", "Maroon-3", "Maroon-4", "Maroon-5"],
+            },
         ],
     },
 
+    # ── 11. Full Cup Minimizer Bra  (FB-709)  10 images ─────────────────────
     {
         "id": 11, "code": "FB-709",
         "name": "Full Cup Minimizer Bra",
@@ -535,13 +678,20 @@ PRODUCTS = [
         "cups":  [4, 5, 7, 8],
         "stock_cup": 4,
         "variants": [
-            {"name": "Ash Grey", "hex": "#9E9E9E", "folder": "FB-709", "best": True,
-             "imgs": ["Ash Grey -1", "Ash grey -2", "Ash Grey -3", "Ash Grey -4", "Ash Grey -5"]},
-            {"name": "Grass",    "hex": "#558B2F", "folder": "FB-709", "best": True,
-             "imgs": ["Grass -1", "Grass -2", "Grass -3", "Grass -4", "Grass -5"]},
+            {
+                "name": "Ash Grey", "hex": "#9E9E9E", "folder": "FB-709", "best": True,
+                # Ash Grey-1, Ash grey-2 (lower g), Ash Grey-3..Ash Grey-5  (5 files)
+                "imgs": ["Ash Grey-1", "Ash grey-2", "Ash Grey-3", "Ash Grey-4", "Ash Grey-5"],
+            },
+            {
+                "name": "Grass", "hex": "#558B2F", "folder": "FB-709", "best": True,
+                # "Grass -5" (space before dash on disk), Grass-1..Grass-4  (5 files)
+                "imgs": ["Grass -5", "Grass-1", "Grass-2", "Grass-3", "Grass-4"],
+            },
         ],
     },
 
+    # ── 12. Seamless Crop Bra  (SCBRA-01 / folder: "replacing")  22 images ──
     {
         "id": 12, "code": "SCBRA-01",
         "name": "Seamless Crop Bra",
@@ -559,17 +709,29 @@ PRODUCTS = [
         "sizes":  [1,  2,  3,  4,  5,  6],
         "stocks": [4,  6, 10, 10,  6,  4],
         "variants": [
-            {"name": "Black", "hex": "#1A1A1A", "folder": "replacing", "best": True,
-             "imgs": ["black-1", "black-2", "black-3 (1)", "black-4", "black-5"]},
-            {"name": "Grey",  "hex": "#9E9E9E", "folder": "replacing", "best": True,
-             "imgs": ["grey-1", "grey-2", "grey-3", "grey-4"]},
-            {"name": "Skin",  "hex": "#F5CBA7", "folder": "replacing", "best": False,
-             "imgs": ["skin-1", "skin-2", "skin-3", "skin-4", "skin-5"]},
+            {
+                "name": "Black", "hex": "#1A1A1A", "folder": "replacing", "best": True,
+                # BLACK C-1..BLACK C-4 (cycling-style shots) + black-1..black-5  (9 files)
+                "imgs": ["BLACK C-1", "BLACK C-2", "BLACK C-3", "BLACK C-4",
+                         "black-1", "black-2", "black-3", "black-4", "black-5"],
+            },
+            {
+                "name": "Grey", "hex": "#9E9E9E", "folder": "replacing", "best": True,
+                # grey-1..grey-4  (4 files)
+                "imgs": ["grey-1", "grey-2", "grey-3", "grey-4"],
+            },
+            {
+                "name": "Skin", "hex": "#F5CBA7", "folder": "replacing", "best": False,
+                # SKIN C-1..SKIN C-4 (cycling-style shots) + skin-1..skin-5  (9 files)
+                "imgs": ["SKIN C-1", "SKIN C-2", "SKIN C-3", "SKIN C-4",
+                         "skin-1", "skin-2", "skin-3", "skin-4", "skin-5"],
+            },
         ],
     },
 
     # ── PANTIES ───────────────────────────────────────────────────────────────
 
+    # ── 13. Lace Hipster Panty  (CP-1132)  24 images ────────────────────────
     {
         "id": 13, "code": "CP-1132",
         "name": "Lace Hipster Panty",
@@ -587,19 +749,35 @@ PRODUCTS = [
         "sizes":  [1,  2,  3,  4,  5,  6,  7],
         "stocks": [3,  5,  8,  8,  5,  4,  3],
         "variants": [
-            {"name": "Bark",   "hex": "#C8A882", "folder": "CP-1132", "best": True,
-             "imgs": ["Bark -1", "Bark -2", "Bark -3", "Bark -5", "Barrk -4"]},
-            {"name": "Black",  "hex": "#1A1A1A", "folder": "CP-1132", "best": True,
-             "imgs": ["Black -1", "Black -2", "Black -3", "Black -4", "Black -5", "Black -6"]},
-            {"name": "Maroon", "hex": "#800000", "folder": "CP-1132", "best": False,
-             "imgs": ["Maroon -1", "Maroon -2", "Maroon -3", "Maroon -4", "Maroon -5"]},
-            {"name": "Mist",   "hex": "#B0BEC5", "folder": "CP-1132", "best": False,
-             "imgs": ["Mist -1", "Mist -2", "Mist -3", "Mist -4"]},
-            {"name": "White",  "hex": "#F5F5F5", "folder": "CP-1132", "best": False,
-             "imgs": ["White -1", "White -2", "White -4", "White3"]},
+            {
+                "name": "Bark", "hex": "#C8A882", "folder": "CP-1132", "best": True,
+                # Bark-1, Bark-2, Bark-3, Bark-5 (skips 4), Barrk-4 (typo on disk)  (5 files)
+                "imgs": ["Bark-1", "Bark-2", "Bark-3", "Bark-5", "Barrk-4"],
+            },
+            {
+                "name": "Black", "hex": "#1A1A1A", "folder": "CP-1132", "best": True,
+                # Black-1..Black-6  (6 files)
+                "imgs": ["Black-1", "Black-2", "Black-3", "Black-4", "Black-5", "Black-6"],
+            },
+            {
+                "name": "Maroon", "hex": "#800000", "folder": "CP-1132", "best": False,
+                # Maroon-1..Maroon-5  (5 files)
+                "imgs": ["Maroon-1", "Maroon-2", "Maroon-3", "Maroon-4", "Maroon-5"],
+            },
+            {
+                "name": "Mist", "hex": "#B0BEC5", "folder": "CP-1132", "best": False,
+                # Mist-1..Mist-4 (capital M)  (4 files)
+                "imgs": ["Mist-1", "Mist-2", "Mist-3", "Mist-4"],
+            },
+            {
+                "name": "White", "hex": "#F5F5F5", "folder": "CP-1132", "best": False,
+                # "White -4" (space before dash on disk), White-1, White-2, White-3  (4 files)
+                "imgs": ["White -4", "White-1", "White-2", "White-3"],
+            },
         ],
     },
 
+    # ── 14. Long Cycling Shorts  (CS-3)  15 images ──────────────────────────
     {
         "id": 14, "code": "CS-3",
         "name": "Long Cycling Shorts",
@@ -617,15 +795,25 @@ PRODUCTS = [
         "sizes":  [1,  2,  3,  4,  5,  6,  7],
         "stocks": [3,  5,  8,  8,  5,  4,  3],
         "variants": [
-            {"name": "Black", "hex": "#1A1A1A", "folder": "CS-3", "best": True,
-             "imgs": ["Black -1", "Black -2", "Black -3", "Black -4", "Black -5"]},
-            {"name": "Nude",  "hex": "#F5CBA7", "folder": "CS-3", "best": True,
-             "imgs": ["Nude -1", "Nude -2", "Nude -3", "Nude -4", "Nude -5"]},
-            {"name": "White", "hex": "#F5F5F5", "folder": "CS-3", "best": False,
-             "imgs": ["White -1", "White -2", "White -3", "White -4", "White -5"]},
+            {
+                "name": "Black", "hex": "#1A1A1A", "folder": "CS-3", "best": True,
+                # Black-1..Black-5  (5 files)
+                "imgs": ["Black-1", "Black-2", "Black-3", "Black-4", "Black-5"],
+            },
+            {
+                "name": "Nude", "hex": "#F5CBA7", "folder": "CS-3", "best": True,
+                # Nude-1..Nude-5  (5 files)
+                "imgs": ["Nude-1", "Nude-2", "Nude-3", "Nude-4", "Nude-5"],
+            },
+            {
+                "name": "White", "hex": "#F5F5F5", "folder": "CS-3", "best": False,
+                # "White -5" (space before dash on disk), White-1..White-4  (5 files)
+                "imgs": ["White -5", "White-1", "White-2", "White-3", "White-4"],
+            },
         ],
     },
 
+    # ── 15. Short Cycling Shorts  (CS-4)  15 images ─────────────────────────
     {
         "id": 15, "code": "CS-4",
         "name": "Short Cycling Shorts",
@@ -643,15 +831,25 @@ PRODUCTS = [
         "sizes":  [1,  2,  3,  4,  5,  6,  7],
         "stocks": [3,  5,  8,  8,  5,  4,  3],
         "variants": [
-            {"name": "Black", "hex": "#1A1A1A", "folder": "CS-4", "best": True,
-             "imgs": ["Black -1", "Black -2", "Black -3", "Black -4", "Black -5"]},
-            {"name": "Nude",  "hex": "#F5CBA7", "folder": "CS-4", "best": True,
-             "imgs": ["Nude -1", "Nude -2", "Nude -3", "Nude -4", "Nude -5"]},
-            {"name": "White", "hex": "#F5F5F5", "folder": "CS-4", "best": False,
-             "imgs": ["White -1", "White -2", "White -3", "White -4", "White -5"]},
+            {
+                "name": "Black", "hex": "#1A1A1A", "folder": "CS-4", "best": True,
+                # Black-1..Black-5  (5 files)
+                "imgs": ["Black-1", "Black-2", "Black-3", "Black-4", "Black-5"],
+            },
+            {
+                "name": "Nude", "hex": "#F5CBA7", "folder": "CS-4", "best": True,
+                # Nude-1..Nude-5  (5 files)
+                "imgs": ["Nude-1", "Nude-2", "Nude-3", "Nude-4", "Nude-5"],
+            },
+            {
+                "name": "White", "hex": "#F5F5F5", "folder": "CS-4", "best": False,
+                # "White -5" (space before dash on disk), White-1..White-4  (5 files)
+                "imgs": ["White -5", "White-1", "White-2", "White-3", "White-4"],
+            },
         ],
     },
 
+    # ── 16. High-Waist Full Panty  (FP-1705)  9 images ──────────────────────
     {
         "id": 16, "code": "FP-1705",
         "name": "High-Waist Full Panty",
@@ -670,13 +868,20 @@ PRODUCTS = [
         "sizes":  [1,  2,  3,  4,  5,  6,  7],
         "stocks": [3,  5,  8,  8,  5,  4,  3],
         "variants": [
-            {"name": "Ash Grey", "hex": "#9E9E9E", "folder": "FP-1705", "best": True,
-             "imgs": ["Ash grey -1", "Ash grey -2", "Ash grey -3", "Ash grey -4"]},
-            {"name": "Grass",    "hex": "#558B2F", "folder": "FP-1705", "best": True,
-             "imgs": ["Grass -1", "Grass -2", "Grass -3", "Grass -4", "Grass -5"]},
+            {
+                "name": "Ash Grey", "hex": "#9E9E9E", "folder": "FP-1705", "best": True,
+                # Ash grey-1..Ash grey-4 (lowercase g throughout)  (4 files)
+                "imgs": ["Ash grey-1", "Ash grey-2", "Ash grey-3", "Ash grey-4"],
+            },
+            {
+                "name": "Grass", "hex": "#558B2F", "folder": "FP-1705", "best": True,
+                # "Grass -5" (space before dash on disk), Grass-1..Grass-4  (5 files)
+                "imgs": ["Grass -5", "Grass-1", "Grass-2", "Grass-3", "Grass-4"],
+            },
         ],
     },
 
+    # ── 17. Printed Bikini Brief  (3BF-14)  12 images ───────────────────────
     {
         "id": 17, "code": "3BF-14",
         "name": "Printed Bikini Brief",
@@ -694,17 +899,27 @@ PRODUCTS = [
         "sizes":  [1,  2,  3,  4,  5,  6],
         "stocks": [4,  6, 10,  6,  4,  3],
         "variants": [
-            {"name": "Teal",   "hex": "#00695C", "folder": "3BF-14", "best": True,
-             "imgs": ["mix -2", "mix -8", "mixed -1", "mixed -2", "mixed -3"]},
-            {"name": "Coral",  "hex": "#E53935", "folder": "3BF-14", "best": True,
-             "imgs": ["mix -3", "mix -4", "mix-5", "mixed -4", "mixed -5"]},
-            {"name": "Purple", "hex": "#9C27B0", "folder": "3BF-14", "best": False,
-             "imgs": ["mix -1", "mix -6", "mix-4", "mixed -1"]},
+            {
+                "name": "Teal", "hex": "#00695C", "folder": "3BF-14", "best": True,
+                # mix-1 (hero multi-colour pack), mix-2, mix-8  (3 files)
+                "imgs": ["mix-1", "mix-2", "mix-8"],
+            },
+            {
+                "name": "Coral", "hex": "#E53935", "folder": "3BF-14", "best": True,
+                # mix-3, mix-5, mixed-2, mixed-3, mixed-4  (5 files)
+                "imgs": ["mix-3", "mix-5", "mixed-2", "mixed-3", "mixed-4"],
+            },
+            {
+                "name": "Purple", "hex": "#9C27B0", "folder": "3BF-14", "best": False,
+                # mix-4, mix-6, mixed-1, mixed-5  (4 files)
+                "imgs": ["mix-4", "mix-6", "mixed-1", "mixed-5"],
+            },
         ],
     },
 
     # ── ESSENTIALS (cat=3) — NO child category ────────────────────────────────
 
+    # ── 18. Shaping Camisole  (SC-2)  10 images ─────────────────────────────
     {
         "id": 18, "code": "SC-2",
         "name": "Shaping Camisole",
@@ -723,24 +938,33 @@ PRODUCTS = [
         "sizes":  [1,  2,  3,  4,  5,  6],
         "stocks": [4,  6, 10, 10,  6,  4],
         "variants": [
-            {"name": "Beige", "hex": "#C8A882", "folder": "SC-2", "best": True,
-             "imgs": ["beige -2", "beige -3", "beige -4", "beige"]},
-            {"name": "Black", "hex": "#1A1A1A", "folder": "SC-2", "best": True,
-             "imgs": ["black -2", "black -3", "black -4", "black"]},
-            {"name": "White", "hex": "#F5F5F5", "folder": "SC-2", "best": False,
-             "imgs": ["White -1", "white -2"]},
+            {
+                "name": "Beige", "hex": "#C8A882", "folder": "SC-2", "best": True,
+                # "beige" (no number), beige-2, beige-3, beige-4  (4 files)
+                "imgs": ["beige", "beige-2", "beige-3", "beige-4"],
+            },
+            {
+                "name": "Black", "hex": "#1A1A1A", "folder": "SC-2", "best": True,
+                # "black" (no number), black-2, black-3, black-4  (4 files)
+                "imgs": ["black", "black-2", "black-3", "black-4"],
+            },
+            {
+                "name": "White", "hex": "#F5F5F5", "folder": "SC-2", "best": False,
+                # White-1, "white -2" (space before dash on disk)  (2 files)
+                "imgs": ["White-1", "white -2"],
+            },
         ],
     },
 ]
 
 
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # SEED FUNCTION
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 def run_seed():
     print("=" * 60)
-    print("  TWAM Seed Script v2 (fixed) -- Starting")
+    print("  TWAM Seed Script v3 (image names corrected) -- Starting")
     print("=" * 60)
 
     with engine.begin() as conn:
@@ -814,8 +1038,6 @@ def run_seed():
         print(f"      {len(PRODUCTS)} products inserted.")
 
         # ── STEP 4: Variants ──────────────────────────────────────────────────
-        # NOTE: Color stores the colour NAME ("Bark"), NOT the hex.
-        #       Hex lives in twam.ProductColor (Step 7).
         print("\n[4/7] Inserting variants...")
         variant_id = 1
         for p in PRODUCTS:
@@ -851,7 +1073,6 @@ def run_seed():
             for v in p["variants"]:
                 vid = v["_vid"]
                 if not p["is_cup"]:
-                    # Alpha-sized products
                     for sz, stock in zip(p["sizes"], p["stocks"]):
                         conn.execute(text("""
                             INSERT INTO twam."ProductVariantDetail"
@@ -882,7 +1103,6 @@ def run_seed():
                         })
                         detail_id += 1
                 else:
-                    # Band × Cup matrix products
                     for band in p["bands"]:
                         for cup in p["cups"]:
                             stock = p["stock_cup"]
@@ -925,7 +1145,7 @@ def run_seed():
                 folder = v["folder"]
                 for fname in v["imgs"]:
                     full  = f"{fname}.png"
-                    fpath = f"/image/{folder}/{full}"
+                    fpath = f"uploads/image/{folder}/{full}"
                     conn.execute(text("""
                         INSERT INTO twam."ProductImage"
                             ("ProductImageId","ProductId","ProductVariantId",
@@ -946,8 +1166,6 @@ def run_seed():
         print(f"      {img_id - 1} images inserted.")
 
         # ── STEP 7: Product Colours ───────────────────────────────────────────
-        # Unique colour name + exact hex stored in twam.ProductColor.
-        # resolve_color() fills in whichever field is missing automatically.
         print("\n[7/7] Inserting product colours...")
         seen_names: set = set()
         color_id = 1
@@ -964,7 +1182,7 @@ def run_seed():
                             (:cid,:cname,:hex,NOW())
                     """), {"cid": color_id, "cname": color_name, "hex": color_hex})
                     color_id += 1
-        print(f"      {color_id - 1} unique colours inserted.")  # ← FIXED: now inside `with` block
+        print(f"      {color_id - 1} unique colours inserted.")
 
         # ── Update sequences to max used IDs ──────────────────────────────────
         seq_vals = [

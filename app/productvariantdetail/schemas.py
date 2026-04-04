@@ -147,9 +147,12 @@ class UserProductListItem(BaseModel):
     price:              Optional[float] = None
     oldPrice:           Optional[float] = None
     image:              Optional[str]   = None
+    images:             Optional[List[str]] = None   # all variant images for hover crossfade
     name:               Optional[str]   = None
     description:        Optional[str]   = None
     rating:             Optional[float] = None
+    reviewCount:        Optional[int]   = None       # review count for rating pill
+    brandName:          Optional[str]   = None       # brand display on card
 
 
 class UserProductListResponse(BaseModel):

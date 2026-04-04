@@ -695,6 +695,11 @@ def _fallback_product_list(db, filters, page_index, page_size, order_property, o
                    AND (pi2."DeletedInd" = false OR pi2."DeletedInd" IS NULL)
                    AND pi2."FilePath" IS NOT NULL
                  ORDER BY pi2."ProductImageId" LIMIT 1)                 AS image,
+                (SELECT ARRAY_AGG(CONCAT(:base, pi3."FilePath") ORDER BY pi3."ProductImageId")
+                 FROM twam."ProductImage" pi3
+                 WHERE pi3."ProductVariantId" = pv."ProductVariantId"
+                   AND (pi3."DeletedInd" = false OR pi3."DeletedInd" IS NULL)
+                   AND pi3."FilePath" IS NOT NULL)                       AS images_arr,
                 COALESCE(p."Name", '')                                  AS name,
                 COALESCE(p."Description", '')                           AS description,
                 COALESCE(
@@ -742,9 +747,9 @@ def _fallback_product_list(db, filters, page_index, page_size, order_property, o
     # 0:pv_id  1:product_id  2:product_code  3:fabric_id  4:size_label  5:color
     # 6:stock_qty  7:processed_qty  8:discount_pct  9:mrp_price  10:final_price
     # 11:user_profile_id  12:state  13:cup_size_label  14:is_best_seller
-    # 15:reserved_col  16:price  17:old_price  18:image  19:name  20:description
-    # 21:_sort_rating  22:review_count  23:_sort_modified  24:_sort_price
-    # 25:_sort_name  26:brand_name  27:_sort_created
+    # 15:reserved_col  16:price  17:old_price  18:image  19:images_arr  20:name
+    # 21:description  22:_sort_rating  23:review_count  24:_sort_modified
+    # 25:_sort_price  26:_sort_name  27:brand_name  28:_sort_created
 
     def _f(val):
         """Safe float — returns None for None, actual float (incl 0.0) otherwise."""
@@ -777,11 +782,13 @@ def _fallback_product_list(db, filters, page_index, page_size, order_property, o
             "price":             _f(r[16]),
             "oldPrice":          _f(r[17]),
             "image":             r[18],
-            "name":              r[19],
-            "description":       r[20],
-            "rating":            _f(r[21]),
-            "reviewCount":       int(r[22]) if r[22] is not None else 0,
-            "brandName":         r[26],
+            # images_arr is at index 19 — full-URL array from ARRAY_AGG
+            "images":            list(r[19]) if r[19] else ([r[18]] if r[18] else []),
+            "name":              r[20],
+            "description":       r[21],
+            "rating":            _f(r[22]),
+            "reviewCount":       int(r[23]) if r[23] is not None else 0,
+            "brandName":         r[27],
         })
 
     # Proximity sort for colour results (closest colour match first)
