@@ -1,10 +1,10 @@
 """
-FastAPI dependency injection for authentication and role-based authorization.
-
-Mirrors:
-  AuthorizeFilterAttribute         → get_current_user (requires valid JWT + email_id claim)
-  [Authorize(Roles = "Super Admin")] → require_roles(...)
-  TWAMConstants.RoleConstants      → role constants
+app/auth/dependencies.py — Fixed
+Fixes:
+  1. RoleId is stored as string in JWT ("2") but int expected — safe conversion
+  2. 401 response code added (frontend handles 401 redirect); 403 for role failures
+  3. get_current_user returns 401 (not 403) for missing/expired tokens
+     so the frontend axios interceptor can auto-redirect to login
 """
 
 from typing import Optional
@@ -16,7 +16,7 @@ import jwt
 from .security import decode_token
 from .schemas import CurrentUser
 
-# ── Constants — mirrors TWAMConstants.RoleConstants ───────────────────────────
+# ── Role constants ─────────────────────────────────────────────────────────────
 
 class Roles:
     SUPER_ADMIN       = 1
@@ -26,7 +26,6 @@ class Roles:
     ORDER_MANAGER     = 5
     CUSTOMER_SUPPORT  = 6
 
-    # Human-readable names (mirror twam.UserRole.RoleName)
     NAMES = {
         1: "Super Admin",
         2: "User",
@@ -36,79 +35,79 @@ class Roles:
         6: "Customer Support",
     }
 
-    # All staff roles (everything except end-user)
     STAFF = {1, 3, 4, 5, 6}
     ALL   = {1, 2, 3, 4, 5, 6}
 
 
-# ── Bearer token extractor ────────────────────────────────────────────────────
+# ── Bearer extractor ───────────────────────────────────────────────────────────
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
 
-# ── Core dependency: get_current_user ─────────────────────────────────────────
-# Mirrors AuthorizeFilterAttribute.OnAuthorizationAsync
-#   • Requires a valid JWT (authenticated)
-#   • Requires the "email_id" claim  (RequireClaim("email_id") in Extensions.cs)
-#   • Returns 403 (not 401) matching the .NET behaviour
+# ── get_current_user ───────────────────────────────────────────────────────────
 
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
 ) -> CurrentUser:
     """
-    Validates Bearer token and returns the current user's claims.
-    Returns HTTP 403 on any failure — matches .NET AuthorizeFilterAttribute (StatusCodeResult(403)).
+    Returns HTTP 401 for missing/expired tokens (triggers frontend redirect).
+    Returns HTTP 403 for invalid tokens or missing claims.
     """
     if credentials is None or not credentials.credentials:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Authentication required.",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Please log in.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     try:
         payload = decode_token(credentials.credentials)
     except jwt.ExpiredSignatureError:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Token has expired.",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Your session has expired. Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     except jwt.InvalidTokenError as e:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid token.",
+            detail=f"Invalid authentication token: {str(e)[:100]}",
         )
 
-    # Mirror RequireClaim("email_id")
-    email_id = payload.get("email_id")
+    email_id = payload.get("email_id") or payload.get("email")
     if not email_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Missing required claim: email_id.",
+            detail="Token missing required claim: email_id",
         )
 
+    # RoleId is stored as string in JWT ("2") — safely convert
+    role_id_raw = payload.get("RoleId") or payload.get("roleId") or 0
     try:
-        role_id = int(payload.get("RoleId", 0))
+        role_id = int(role_id_raw)
     except (TypeError, ValueError):
         role_id = 0
 
+    # user_id comes from "sub" claim = UserProfileId (GUID)
+    user_id = str(payload.get("sub") or payload.get("UserId") or "")
+
     return CurrentUser(
-        user_id    = payload.get("sub") or payload.get("UserId", ""),
+        user_id    = user_id,
         email      = email_id,
         role_id    = role_id,
-        role_name  = payload.get("RoleName") or payload.get("role", ""),
-        first_name = payload.get("FirstName", ""),
-        last_name  = payload.get("LastName", ""),
-        full_name  = payload.get("name", ""),
-        tenant_id  = payload.get("TenantId", "1"),
+        role_name  = payload.get("RoleName") or payload.get("role") or "",
+        first_name = payload.get("FirstName") or payload.get("given_name") or "",
+        last_name  = payload.get("LastName")  or payload.get("family_name") or "",
+        full_name  = payload.get("name") or "",
+        tenant_id  = str(payload.get("TenantId") or "1"),
     )
 
 
-# ── Optional user (for public endpoints that can also serve logged-in users) ──
+# ── Optional user ──────────────────────────────────────────────────────────────
 
 async def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
 ) -> Optional[CurrentUser]:
-    """Returns CurrentUser if token is present and valid, None otherwise."""
     if credentials is None or not credentials.credentials:
         return None
     try:
@@ -117,23 +116,9 @@ async def get_optional_user(
         return None
 
 
-# ── Role-based authorization factory ─────────────────────────────────────────
-# Usage:  Depends(require_roles(Roles.SUPER_ADMIN, Roles.ORDER_MANAGER))
+# ── Role-gated factory ─────────────────────────────────────────────────────────
 
 def require_roles(*allowed_role_ids: int):
-    """
-    Dependency factory — enforces role-based access.
-
-    Usage:
-        @router.get("/admin", dependencies=[Depends(require_roles(Roles.SUPER_ADMIN))])
-        async def admin_endpoint():
-            ...
-
-        # Or with current_user injection:
-        @router.get("/orders")
-        async def list_orders(user = Depends(require_roles(Roles.SUPER_ADMIN, Roles.ORDER_MANAGER))):
-            ...
-    """
     allowed = set(allowed_role_ids)
 
     async def _check(
@@ -150,23 +135,31 @@ def require_roles(*allowed_role_ids: int):
     return _check
 
 
-# ── Convenience shortcuts ─────────────────────────────────────────────────────
+# ── Admin user dependency ──────────────────────────────────────────────────────
+
+async def get_current_admin_user(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """Requires Super Admin or Order Manager."""
+    allowed = {Roles.SUPER_ADMIN, Roles.ORDER_MANAGER}
+    if current_user.role_id not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin or Order Manager role required.",
+        )
+    return current_user
+
+
+# ── Shortcuts ──────────────────────────────────────────────────────────────────
 
 def require_super_admin():
-    """Only SuperAdmin (RoleId=1)."""
     return require_roles(Roles.SUPER_ADMIN)
 
-
 def require_staff():
-    """Any staff role (SuperAdmin, InventoryManager, ProductManager, OrderManager, CustomerSupport)."""
     return require_roles(*Roles.STAFF)
 
-
 def require_admin_or_order_manager():
-    """SuperAdmin or OrderManager — e.g. for order management endpoints."""
     return require_roles(Roles.SUPER_ADMIN, Roles.ORDER_MANAGER)
 
-
 def require_inventory_access():
-    """SuperAdmin, InventoryManager, or ProductManager."""
     return require_roles(Roles.SUPER_ADMIN, Roles.INVENTORY_MANAGER, Roles.PRODUCT_MANAGER)

@@ -42,6 +42,9 @@ class DeliveryChargeResponse(BaseModel):
     shippingTypeId: Optional[int] = None
     deliveryCharges: Optional[float] = None
     orderValueRange: Optional[str] = None
+    minOrderValue: Optional[float] = None
+    isEligible: Optional[bool] = None
+    unlockAmount: Optional[float] = None
     state: Optional[str] = None
     isActive: bool
     days: Optional[str] = None

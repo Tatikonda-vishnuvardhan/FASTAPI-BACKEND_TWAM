@@ -71,7 +71,7 @@ def get_address_by_id(db: Session, address_id: int) -> Optional[dict]:
     return _enrich(db, addr)
 
 
-def create_address(db: Session, data) -> bool:
+def create_address(db: Session, data) -> int:
     """
     Mirrors CreateAddressCommandHandler:
     - First address for user → auto set as default
@@ -118,17 +118,24 @@ def create_address(db: Session, data) -> bool:
         )
         db.commit()
 
-    return True
+    return addr.addressId
 
 
-def update_address(db: Session, address_id: int, data) -> Optional[int]:
+def update_address(
+    db: Session,
+    address_id: int,
+    data,
+    current_user_id: Optional[str] = None,
+    is_staff: bool = False,
+) -> Optional[int]:
     """
     Mirrors UpdateAddressCommandHandler:
     - If isDefault → clear other defaults first
     """
-    addr = db.query(Address).filter(
-        Address.addressId == address_id
-    ).first()
+    query = db.query(Address).filter(Address.addressId == address_id)
+    if not is_staff and current_user_id:
+        query = query.filter(Address.userProfileId == current_user_id)
+    addr = query.first()
     if not addr:
         return None
 
@@ -163,10 +170,16 @@ def update_address(db: Session, address_id: int, data) -> Optional[int]:
     return addr.addressId
 
 
-def delete_address(db: Session, address_id: int) -> bool:
-    addr = db.query(Address).filter(
-        Address.addressId == address_id
-    ).first()
+def delete_address(
+    db: Session,
+    address_id: int,
+    current_user_id: Optional[str] = None,
+    is_staff: bool = False,
+) -> bool:
+    query = db.query(Address).filter(Address.addressId == address_id)
+    if not is_staff and current_user_id:
+        query = query.filter(Address.userProfileId == current_user_id)
+    addr = query.first()
     if not addr:
         return False
     addr.deletedInd   = True

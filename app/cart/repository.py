@@ -296,8 +296,11 @@ def create_bulk_cart(db: Session, items: list, user_profile_id: str) -> Dict:
 
 # ── Update Cart ───────────────────────────────────────────────────────────────
 
-def update_cart(db: Session, cart_id: int, quantity: int) -> Optional[int]:
-    cart = db.query(Cart).filter(Cart.cartId == cart_id).first()
+def update_cart(db: Session, cart_id: int, quantity: int, user_profile_id: str, is_staff: bool = False) -> Optional[int]:
+    query = db.query(Cart).filter(Cart.cartId == cart_id)
+    if not is_staff:
+        query = query.filter(Cart.userProfileId == user_profile_id)
+    cart = query.first()
     if not cart:
         return None
     cart.quantity = quantity
@@ -309,8 +312,11 @@ def update_cart(db: Session, cart_id: int, quantity: int) -> Optional[int]:
 
 # ── Delete Cart (single) ──────────────────────────────────────────────────────
 
-def delete_cart(db: Session, cart_id: int) -> bool:
-    cart = db.query(Cart).filter(Cart.cartId == cart_id).first()
+def delete_cart(db: Session, cart_id: int, user_profile_id: str, is_staff: bool = False) -> bool:
+    query = db.query(Cart).filter(Cart.cartId == cart_id)
+    if not is_staff:
+        query = query.filter(Cart.userProfileId == user_profile_id)
+    cart = query.first()
     if not cart:
         return False
     cart.deletedInd = True
@@ -322,8 +328,11 @@ def delete_cart(db: Session, cart_id: int) -> bool:
 
 # ── Delete Cart (multiple) ────────────────────────────────────────────────────
 
-def delete_multiple_carts(db: Session, ids: List[int]) -> bool:
-    carts = db.query(Cart).filter(Cart.cartId.in_(ids)).all()
+def delete_multiple_carts(db: Session, ids: List[int], user_profile_id: str, is_staff: bool = False) -> bool:
+    query = db.query(Cart).filter(Cart.cartId.in_(ids))
+    if not is_staff:
+        query = query.filter(Cart.userProfileId == user_profile_id)
+    carts = query.all()
     if not carts:
         return False
     for cart in carts:

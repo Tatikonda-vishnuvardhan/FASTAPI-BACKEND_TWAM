@@ -50,10 +50,15 @@ def get_all(db, filters, order_ascending, order_property, page_index, page_size)
 
             p."Name"                    AS productName,
             pv."VariantName"            AS variantName,
+            b."brandName"               AS brandName,
 
             pvd."FinalPrice"  AS finalPrice,
             pvd."MRPPrice"    AS mrpPrice,
             pv."Color"        AS color,
+            pv."Color"        AS colorName,
+            NULL              AS colorHex,
+            COALESCE(prs.avg_rating, 0)    AS rating,
+            COALESCE(prs.review_count, 0)  AS reviewCount,
 
             -- Get first image from ProductImage table
             (SELECT pi2."FilePath"
@@ -62,7 +67,15 @@ def get_all(db, filters, order_ascending, order_property, page_index, page_size)
                AND pi2."DeletedInd" = false
                AND pi2."FilePath" IS NOT NULL
              ORDER BY pi2."CreatedDate"
-             LIMIT 1) AS imageURL
+             LIMIT 1) AS imageURL,
+            (SELECT pi3."FilePath"
+             FROM twam."ProductImage" pi3
+             WHERE pi3."ProductVariantId" = w."ProductVariantId"
+               AND pi3."DeletedInd" = false
+               AND pi3."FilePath" IS NOT NULL
+             ORDER BY pi3."CreatedDate"
+             OFFSET 1
+             LIMIT 1) AS hoverImage
 
         FROM twam."Wishlist" w
         LEFT JOIN twam."ProductVariants" pv
@@ -79,6 +92,18 @@ def get_all(db, filters, order_ascending, order_property, page_index, page_size)
                )
         LEFT JOIN twam."Products" p
                ON p."ProductId" = w."ProductId"
+        LEFT JOIN mdm."brands" b
+               ON b."brandId" = p."BrandId"
+        LEFT JOIN (
+            SELECT
+                pr."ProductVariantId" AS productVariantId,
+                ROUND(AVG(pr."Rating"::NUMERIC), 1) AS avg_rating,
+                COUNT(pr."ProductReviewId") AS review_count
+            FROM twam."ProductReview" pr
+            WHERE pr."DeletedInd" = false
+            GROUP BY pr."ProductVariantId"
+        ) prs
+               ON prs.productVariantId = w."ProductVariantId"
         WHERE w."DeletedInd" = false
     """
 
@@ -103,8 +128,11 @@ def get_all(db, filters, order_ascending, order_property, page_index, page_size)
             return raw.get(key) or raw.get(key.lower()) or raw.get(key.upper())
 
         img = g('imageURL') or g('imageurl') or ''
+        hover_img = g('hoverImage') or g('hoverimage') or ''
         if img and not img.startswith('http'):
             img = BASE_URL.rstrip('/') + '/' + img.lstrip('/')
+        if hover_img and not hover_img.startswith('http'):
+            hover_img = BASE_URL.rstrip('/') + '/' + hover_img.lstrip('/')
 
         results.append({
             'wishlistId':             g('wishlistId'),
@@ -118,7 +146,13 @@ def get_all(db, filters, order_ascending, order_property, page_index, page_size)
             'finalPrice':             float(g('finalPrice')) if g('finalPrice') is not None else None,
             'mrpPrice':               float(g('mrpPrice'))   if g('mrpPrice')   is not None else None,
             'imageURL':               img,
+            'hoverImage':             hover_img,
             'color':                  g('color'),
+            'colorName':              g('colorName') or g('color'),
+            'colorHex':               g('colorHex'),
+            'brandName':              g('brandName'),
+            'rating':                 float(g('rating')) if g('rating') is not None else 0,
+            'reviewCount':            int(g('reviewCount')) if g('reviewCount') is not None else 0,
             'sizeLabel':              g('sizeLabel'),
             'createdDate':            g('createdDate'),
         })
@@ -322,12 +356,17 @@ def get_user_wishlist(db: Session, user_id: str):
 
             p."Name" AS productName,
             pv."VariantName" AS variantName,
+            b."brandName" AS brandName,
 
             pvd."FinalPrice",
             pvd."MRPPrice",
             pvd."DiscountPercent",
             sz."SizeLabel",
             pv."Color",
+            pv."Color" AS colorName,
+            NULL AS colorHex,
+            COALESCE(prs.avg_rating, 0) AS rating,
+            COALESCE(prs.review_count, 0) AS reviewCount,
 
             (
                 SELECT pi."FilePath"
@@ -337,7 +376,17 @@ def get_user_wishlist(db: Session, user_id: str):
                     AND (pi."DeletedInd" = false OR pi."DeletedInd" IS NULL)
                 ORDER BY pi."ProductImageId"
                 LIMIT 1
-            ) AS imageURL
+            ) AS imageURL,
+            (
+                SELECT pi."FilePath"
+                FROM twam."ProductImage" pi
+                WHERE 
+                    pi."ProductVariantId" = w."ProductVariantId"
+                    AND (pi."DeletedInd" = false OR pi."DeletedInd" IS NULL)
+                ORDER BY pi."ProductImageId"
+                OFFSET 1
+                LIMIT 1
+            ) AS hoverImage
 
         FROM twam."Wishlist" w
         LEFT JOIN twam."Products" p 
@@ -348,6 +397,18 @@ def get_user_wishlist(db: Session, user_id: str):
                ON pvd."ProductVariantDetailId" = w."ProductVariantDetailId"
         LEFT JOIN mdm."Size" sz
                ON sz."SizeId" = pvd."Size"
+        LEFT JOIN mdm."brands" b
+               ON b."brandId" = p."BrandId"
+        LEFT JOIN (
+            SELECT
+                pr."ProductVariantId" AS productVariantId,
+                ROUND(AVG(pr."Rating"::NUMERIC), 1) AS avg_rating,
+                COUNT(pr."ProductReviewId") AS review_count
+            FROM twam."ProductReview" pr
+            WHERE pr."DeletedInd" = false
+            GROUP BY pr."ProductVariantId"
+        ) prs
+               ON prs.productVariantId = w."ProductVariantId"
 
         WHERE w."UserProfileId" = :uid AND w."DeletedInd" = false
         ORDER BY w."CreatedDate" DESC;

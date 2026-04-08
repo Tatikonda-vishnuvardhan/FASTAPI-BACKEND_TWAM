@@ -81,6 +81,23 @@ def get_product_by_name(name: str = Query(...), db: Session = Depends(get_db)):
     return result
 
 
+@router.get("/NewArrivals", response_model=schemas.UserProductListResponse)
+def get_new_arrivals(
+    page_index: Optional[int] = Query(1,  alias="page.index"),
+    page_size:  Optional[int] = Query(40, alias="page.size"),
+    db: Session = Depends(get_db)
+):
+    """
+    Return product variants added in the last 6 months, newest first.
+    Public endpoint — no authentication required.
+    """
+    return variant_repo.get_new_arrivals(
+        db,
+        page_index=page_index or 1,
+        page_size=page_size  or 40,
+    )
+
+
 @router.get("/GetProductColor")
 def get_product_colors(db: Session = Depends(get_db)):
     rows = db.execute(sqlalchemy.text(

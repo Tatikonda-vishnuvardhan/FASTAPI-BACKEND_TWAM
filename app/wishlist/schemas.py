@@ -29,10 +29,17 @@ class WishlistResponse(BaseModel):
     userProfileId: Optional[str] = None
     state: Optional[str] = None
     imageURL: Optional[str] = None
+    hoverImage: Optional[str] = None
     productName: Optional[str] = None
     variantName: Optional[str] = None
     finalPrice: Optional[float] = None
     mrpPrice: Optional[float] = None
+    color: Optional[str] = None
+    colorName: Optional[str] = None
+    colorHex: Optional[str] = None
+    brandName: Optional[str] = None
+    rating: Optional[float] = None
+    reviewCount: Optional[int] = None
     sizeLabel: Optional[str] = None
     createdDate: Optional[datetime] = None
     class Config:

@@ -12,10 +12,18 @@ Usage:
 
 from typing import List
 from pydantic import field_validator
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
     # ── Database ──────────────────────────────────────────────────────────────
     database_url: str
 
@@ -36,11 +44,6 @@ class Settings(BaseSettings):
 
     # ── App ───────────────────────────────────────────────────────────────────
     app_env: str = "development"
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
 
     @field_validator("secret_key")
     @classmethod

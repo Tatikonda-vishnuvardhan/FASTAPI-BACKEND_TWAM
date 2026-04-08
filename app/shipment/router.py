@@ -1,18 +1,26 @@
-from fastapi import APIRouter, Depends, HTTPException, Path
+"""
+app/shipment/router.py  (UPDATED)
+──────────────────────────────────
+Key change: /TrackShipment/{tracking_id} now calls track_shipment_live()
+which queries Ekart Elite API for live events AND merges DB state.
+"""
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
 from . import schemas, repository
-from app.auth.dependencies import get_current_user, require_roles, Roles, CurrentUser
+from app.auth.dependencies import get_current_user, get_current_admin_user
 
 router = APIRouter(
-    dependencies=[Depends(get_current_user)],prefix="/api/Shipment", tags=["Shipment"])
+    dependencies=[Depends(get_current_user)],
+    prefix="/api/Shipment",
+    tags=["Shipment"],
+)
 
 
 @router.post("/", response_model=schemas.ShipmentResponse)
 def create_shipment(command: schemas.CreateShipmentRequest, db: Session = Depends(get_db)):
     try:
-        result = repository.create_shipment(db, command)
-        return result
+        return repository.create_shipment(db, command)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -20,16 +28,21 @@ def create_shipment(command: schemas.CreateShipmentRequest, db: Session = Depend
 @router.post("/CancelShipment")
 def cancel_shipment(command: schemas.CancelShipmentRequest, db: Session = Depends(get_db)):
     try:
-        result = repository.cancel_shipment(db, command.orderId)
-        return {"success": result}
+        return {"success": repository.cancel_shipment(db, command.orderId)}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.get("/TrackShipment/{tracking_id}")
-def track_shipment(tracking_id: str):
-    # TODO: Integrate IDeliveryService.TrackShipmentAsync
-    return {"trackingId": tracking_id, "message": "TODO: Integrate delivery service tracking."}
+def track_shipment(tracking_id: str, db: Session = Depends(get_db)):
+    """
+    Returns LIVE tracking events from Ekart Elite API merged with DB state.
+    Falls back to DB-only data if Ekart API is unreachable.
+    """
+    result = repository.track_shipment_live(db, tracking_id)
+    if not result.get("trackingId"):
+        raise HTTPException(status_code=404, detail="Tracking ID not found.")
+    return result
 
 
 @router.post("/GetShipmentOrderDetail", response_model=schemas.ShipmentData)
@@ -51,8 +64,7 @@ def get_delhivery_shipment_detail(command: schemas.ShipmentDataRequest, db: Sess
 @router.post("/CreateDelhiveryShipment")
 def create_delhivery_shipment(command: schemas.CreateDelhiveryShipmentRequest, db: Session = Depends(get_db)):
     try:
-        result = repository.create_delhivery_shipment(db, command)
-        return {"result": result}
+        return {"result": repository.create_delhivery_shipment(db, command)}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -68,7 +80,6 @@ def get_return_shipment_detail(command: schemas.ShipmentDataRequest, db: Session
 @router.post("/CreateReturnShipment")
 def create_return_shipment(command: schemas.CreateReturnShipmentRequest, db: Session = Depends(get_db)):
     try:
-        result = repository.create_return_shipment(db, command)
-        return {"result": result}
+        return {"result": repository.create_return_shipment(db, command)}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

@@ -507,31 +507,45 @@ def _fallback_product_list(db, filters, page_index, page_size, order_property, o
 
     # ── Band/alpha size (multi-select) ────────────────────────────────────────
     sz = _fv("Size")
-    if sz and sz != "0":
-        sz_ids = [s.strip() for s in sz.split(",") if s.strip() and s.strip() != "0"]
-        if len(sz_ids) == 1:
-            conds.append("pvd.\"Size\"::TEXT = :sz")
-            params["sz"] = sz_ids[0]
-        elif len(sz_ids) > 1:
-            in_ph = ", ".join(f":sz_{i}" for i in range(len(sz_ids)))
-            for i, sid in enumerate(sz_ids):
-                params[f"sz_{i}"] = sid
-            conds.append(f"pvd.\"Size\"::TEXT IN ({in_ph})")
+    sz_ids = [
+        s.strip() for s in sz.split(",")
+        if s.strip() and s.strip() != "0"
+    ] if sz and sz != "0" else []
 
-    # ── Cup size (multi-select) ───────────────────────────────────────────────
     cup_sz = _fv("CupSize")
-    if cup_sz and cup_sz != "0":
-        cup_ids = [s.strip() for s in cup_sz.split(",") if s.strip() and s.strip() != "0"]
-        if len(cup_ids) == 1:
-            conds.append("pvd.\"CupSize\"::TEXT = :cup_sz")
+    cup_ids = [
+        s.strip() for s in cup_sz.split(",")
+        if s.strip() and s.strip() != "0"
+    ] if cup_sz and cup_sz != "0" else []
+
+    if len(sz_ids) == 1:
+        conds.append('pvd."Size"::TEXT = :sz')
+        params["sz"] = sz_ids[0]
+    elif len(sz_ids) > 1:
+        in_ph = ", ".join(f":sz_{i}" for i in range(len(sz_ids)))
+        for i, sid in enumerate(sz_ids):
+            params[f"sz_{i}"] = sid
+        conds.append(f'pvd."Size"::TEXT IN ({in_ph})')
+
+    if cup_ids:
+        if sz_ids:
+            if len(cup_ids) == 1:
+                conds.append('(pvd."CupSize" IS NULL OR pvd."CupSize"::TEXT = :cup_sz)')
+                params["cup_sz"] = cup_ids[0]
+            else:
+                in_ph = ", ".join(f":cup_sz_{i}" for i in range(len(cup_ids)))
+                for i, cid in enumerate(cup_ids):
+                    params[f"cup_sz_{i}"] = cid
+                conds.append(f'(pvd."CupSize" IS NULL OR pvd."CupSize"::TEXT IN ({in_ph}))')
+        elif len(cup_ids) == 1:
+            conds.append('pvd."CupSize"::TEXT = :cup_sz')
             params["cup_sz"] = cup_ids[0]
-        elif len(cup_ids) > 1:
+        else:
             in_ph = ", ".join(f":cup_sz_{i}" for i in range(len(cup_ids)))
             for i, cid in enumerate(cup_ids):
                 params[f"cup_sz_{i}"] = cid
-            conds.append(f"pvd.\"CupSize\"::TEXT IN ({in_ph})")
+            conds.append(f'pvd."CupSize"::TEXT IN ({in_ph})')
 
-    # ── Color filter (ILIKE + optional proximity sort) ────────────────────────
     col = _fv("color")
     color_proximity_anchor = None
     if col and col not in ("0", ""):
@@ -675,6 +689,9 @@ def _fallback_product_list(db, filters, page_index, page_size, order_property, o
                 p."ProductId"                                           AS product_id,
                 p."ProductCode"                                         AS product_code,
                 pv."FabricId"                                           AS fabric_id,
+                pvd."Size"                                              AS size_id,
+                pvd."CupSize"                                           AS cup_size_id,
+                COALESCE(pv."IsCupSize", false)                         AS is_cup_size,
                 COALESCE(s."SizeLabel", '')                             AS size_label,
                 COALESCE(pv."Color", '')                                AS color,
                 COALESCE(pvd."StockQuantity", 0)::INTEGER               AS stock_qty,
@@ -743,16 +760,182 @@ def _fallback_product_list(db, filters, page_index, page_size, order_property, o
         import traceback; traceback.print_exc()
         return {"count": 0, "list": []}
 
-    # Column index reference (matches SELECT aliases above):
-    # 0:pv_id  1:product_id  2:product_code  3:fabric_id  4:size_label  5:color
-    # 6:stock_qty  7:processed_qty  8:discount_pct  9:mrp_price  10:final_price
-    # 11:user_profile_id  12:state  13:cup_size_label  14:is_best_seller
-    # 15:reserved_col  16:price  17:old_price  18:image  19:images_arr  20:name
-    # 21:description  22:_sort_rating  23:review_count  24:_sort_modified
-    # 25:_sort_price  26:_sort_name  27:brand_name  28:_sort_created
+    def _f(val):
+        """Safe float ? returns None for None, actual float (incl 0.0) otherwise."""
+        if val is None:
+            return None
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return None
+
+    items = []
+    for r in rows:
+        m = r._mapping
+        items.append({
+            "productVariantId":  m["pv_id"],
+            "productId":         m["product_id"],
+            "productCode":       m["product_code"],
+            "fabricId":          m["fabric_id"],
+            "sizeId":            m["size_id"],
+            "size":              m["size_label"],
+            "color":             m["color"],
+            "stockQuantity":     m["stock_qty"],
+            "processedQuantity": m["processed_qty"],
+            "discountPercent":   m["discount_pct"],
+            "mrpPrice":          _f(m["mrp_price"]),
+            "finalPrice":        _f(m["final_price"]),
+            "userProfileId":     m["user_profile_id"],
+            "state":             m["state"],
+            "cupSizeId":         m["cup_size_id"],
+            "cupSize":           m["cup_size_label"],
+            "isCupSize":         bool(m["is_cup_size"]) if m["is_cup_size"] is not None else None,
+            "isBestSeller":      m["is_best_seller"],
+            "totalCount":        total,
+            "price":             _f(m["price"]),
+            "oldPrice":          _f(m["old_price"]),
+            "image":             m["image"],
+            "images":            list(m["images_arr"]) if m["images_arr"] else ([m["image"]] if m["image"] else []),
+            "name":              m["name"],
+            "description":       m["description"],
+            "rating":            _f(m["_sort_rating"]),
+            "reviewCount":       int(m["review_count"]) if m["review_count"] is not None else 0,
+            "brandName":         m["brand_name"],
+        })
+
+    # Proximity sort for colour results (closest colour match first)
+    if color_proximity_anchor:
+        def _color_key(item):
+            c = item.get("color", "") or ""
+            hex_val = resolve_hex(c)
+            if not hex_val:
+                return 9999.0
+            try:
+                return _redmean_distance(color_proximity_anchor, hex_val)
+            except Exception:
+                return 9999.0
+        items.sort(key=_color_key)
+
+    return {"count": total, "list": items}
+
+# ── New Arrivals — products added in the last 6 months ────────────────────────
+
+def get_new_arrivals(
+    db: Session,
+    page_index: int = 1,
+    page_size: int = 40,
+) -> dict:
+    """
+    Return product variants whose ProductVariants.CreatedDate falls within the
+    last 6 months, ordered newest-first.  Only active/non-deleted variants with
+    at least one non-deleted ProductVariantDetail are returned.
+    """
+    BASE = os.getenv("BASE_URL", "")
+
+    p_index = max(1, page_index)
+    p_size  = max(1, page_size)
+    offset  = (p_index - 1) * p_size
+
+    params = {"base": BASE, "lim": p_size, "off": offset}
+
+    where = """
+        (pv."DeletedInd" = false OR pv."DeletedInd" IS NULL)
+        AND (p."DeletedInd"  = false OR p."DeletedInd"  IS NULL)
+        AND pv."CreatedDate" >= NOW() - INTERVAL '6 months'
+    """
+
+    count_sql = f"""
+        SELECT COUNT(DISTINCT pv."ProductVariantId")
+        FROM twam."ProductVariants" pv
+        JOIN twam."Products" p ON p."ProductId" = pv."ProductId"
+        LEFT JOIN twam."ProductVariantDetail" pvd
+          ON pvd."ProductVariantId" = pv."ProductVariantId"
+         AND (pvd."DeletedInd" = false OR pvd."DeletedInd" IS NULL)
+        LEFT JOIN mdm.brands b ON b."brandId" = p."BrandId"
+        WHERE {where}
+    """
+
+    try:
+        total_row = db.execute(text(count_sql), params).fetchone()
+        total = int(total_row[0]) if total_row else 0
+    except Exception:
+        import traceback; traceback.print_exc()
+        total = 0
+
+    data_sql = f"""
+        SELECT * FROM (
+            SELECT DISTINCT ON (pv."ProductVariantId")
+                pv."ProductVariantId"                                   AS pv_id,
+                p."ProductId"                                           AS product_id,
+                p."ProductCode"                                         AS product_code,
+                pv."FabricId"                                           AS fabric_id,
+                COALESCE(s."SizeLabel", '')                             AS size_label,
+                COALESCE(pv."Color", '')                                AS color,
+                COALESCE(pvd."StockQuantity", 0)::INTEGER               AS stock_qty,
+                COALESCE(pvd."ProcessedQuantity", 0)::INTEGER           AS processed_qty,
+                COALESCE(pvd."DiscountPercent", 0)::INTEGER             AS discount_pct,
+                pvd."MRPPrice"                                          AS mrp_price,
+                pvd."FinalPrice"                                        AS final_price,
+                COALESCE(pv."UserProfileId", '')                        AS user_profile_id,
+                COALESCE(pvd."State", pv."State", 'Approved')           AS state,
+                COALESCE(cs."SizeLabel", '')                            AS cup_size_label,
+                COALESCE(pv."IsBestSeller", false)                      AS is_best_seller,
+                0                                                       AS reserved_col,
+                COALESCE(pvd."FinalPrice", pvd."MRPPrice")              AS price,
+                pvd."MRPPrice"                                          AS old_price,
+                (SELECT CONCAT(:base, pi2."FilePath")
+                 FROM twam."ProductImage" pi2
+                 WHERE pi2."ProductVariantId" = pv."ProductVariantId"
+                   AND (pi2."DeletedInd" = false OR pi2."DeletedInd" IS NULL)
+                   AND pi2."FilePath" IS NOT NULL
+                 ORDER BY pi2."ProductImageId" LIMIT 1)                 AS image,
+                (SELECT ARRAY_AGG(CONCAT(:base, pi3."FilePath") ORDER BY pi3."ProductImageId")
+                 FROM twam."ProductImage" pi3
+                 WHERE pi3."ProductVariantId" = pv."ProductVariantId"
+                   AND (pi3."DeletedInd" = false OR pi3."DeletedInd" IS NULL)
+                   AND pi3."FilePath" IS NOT NULL)                       AS images_arr,
+                COALESCE(p."Name", '')                                  AS name,
+                COALESCE(p."Description", '')                           AS description,
+                COALESCE(
+                    (SELECT ROUND(AVG(pr."Rating"::NUMERIC), 1)
+                     FROM twam."ProductReview" pr
+                     WHERE pr."ProductVariantId" = pv."ProductVariantId"
+                       AND (pr."DeletedInd" = false OR pr."DeletedInd" IS NULL)),
+                    0
+                )                                                       AS rating,
+                COALESCE(
+                    (SELECT COUNT(pr2."ProductReviewId")
+                     FROM twam."ProductReview" pr2
+                     WHERE pr2."ProductVariantId" = pv."ProductVariantId"
+                       AND (pr2."DeletedInd" = false OR pr2."DeletedInd" IS NULL)),
+                    0
+                )                                                       AS review_count,
+                pv."CreatedDate"                                        AS created_date,
+                COALESCE(pvd."FinalPrice", pvd."MRPPrice")              AS sort_price,
+                p."Name"                                                AS sort_name,
+                b."brandName"                                           AS brand_name
+            FROM twam."ProductVariants" pv
+            JOIN twam."Products" p ON p."ProductId" = pv."ProductId"
+            LEFT JOIN twam."ProductVariantDetail" pvd
+              ON pvd."ProductVariantId" = pv."ProductVariantId"
+             AND (pvd."DeletedInd" = false OR pvd."DeletedInd" IS NULL)
+            LEFT JOIN mdm."Size" s     ON s."SizeId"     = pvd."Size"
+            LEFT JOIN mdm."CupSize" cs ON cs."CupSizeId" = pvd."CupSize"
+            LEFT JOIN mdm.brands b     ON b."brandId"    = p."BrandId"
+            WHERE {where}
+            ORDER BY pv."ProductVariantId", pvd."ProductVariantDetailId" ASC NULLS LAST
+        ) deduped
+        ORDER BY created_date DESC NULLS LAST
+        LIMIT :lim OFFSET :off
+    """
+
+    try:
+        rows = db.execute(text(data_sql), params).fetchall()
+    except Exception:
+        import traceback; traceback.print_exc()
+        return {"count": 0, "list": []}
 
     def _f(val):
-        """Safe float — returns None for None, actual float (incl 0.0) otherwise."""
         if val is None:
             return None
         try:
@@ -782,7 +965,6 @@ def _fallback_product_list(db, filters, page_index, page_size, order_property, o
             "price":             _f(r[16]),
             "oldPrice":          _f(r[17]),
             "image":             r[18],
-            # images_arr is at index 19 — full-URL array from ARRAY_AGG
             "images":            list(r[19]) if r[19] else ([r[18]] if r[18] else []),
             "name":              r[20],
             "description":       r[21],
@@ -790,18 +972,5 @@ def _fallback_product_list(db, filters, page_index, page_size, order_property, o
             "reviewCount":       int(r[23]) if r[23] is not None else 0,
             "brandName":         r[27],
         })
-
-    # Proximity sort for colour results (closest colour match first)
-    if color_proximity_anchor:
-        def _color_key(item):
-            c = item.get("color", "") or ""
-            hex_val = resolve_hex(c)
-            if not hex_val:
-                return 9999.0
-            try:
-                return _redmean_distance(color_proximity_anchor, hex_val)
-            except Exception:
-                return 9999.0
-        items.sort(key=_color_key)
 
     return {"count": total, "list": items}

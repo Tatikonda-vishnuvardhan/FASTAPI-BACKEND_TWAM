@@ -8,10 +8,16 @@ Angular calls these endpoints (all derived from environment.ts):
   POST /api/register/signup                   ← AuthenticationService.createUser()
   POST /api/register/ChangePassword           ← PasswordManagementService.changePassword()
   POST /api/register/SendResetPasswordLink    ← legacy link-based reset
-  POST /api/register/SendForgotPasswordOtp    ← NEW: OTP-based forgot password (step 1)
-  POST /api/register/VerifyForgotPasswordOtp  ← NEW: OTP-based forgot password (step 2)
+  POST /api/register/SendForgotPasswordOtp    ← OTP-based forgot password (step 1)
+  POST /api/register/VerifyForgotPasswordOtp  ← OTP-based forgot password (step 2)
   POST /api/register/ResetPassword            ← set new password after OTP verify (step 3)
   POST /api/register/update                   ← PasswordManagementService.update()
+
+Secret management change
+─────────────────────────
+oauth_client_id and oauth_client_secret are now loaded from the AppSettings
+DB table (via app/shared/app_settings.py) instead of being hardcoded here.
+Update them with a single DB row — no code change or redeploy needed.
 """
 
 import os
@@ -54,6 +60,19 @@ _otp_store: dict[str, dict] = {}
 
 OTP_TTL_MINUTES = 10
 OTP_MAX_ATTEMPTS = 5
+
+
+# ── OAuth2 client validation (reads from AppSettings, not hardcoded) ──────────
+
+def _validate_client(client_id: Optional[str], client_secret: Optional[str]) -> bool:
+    """
+    Validate OAuth2 client credentials against values stored in AppSettings.
+    Falls back to compiled-in defaults if the cache is empty (first-boot).
+    """
+    from app.shared.app_settings import get_setting
+    valid_id     = get_setting("oauth_client_id")
+    valid_secret = get_setting("oauth_client_secret")
+    return (client_id or "") == valid_id and (client_secret or "") == valid_secret
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -167,14 +186,15 @@ async def connect_token(
     grant_type:    str           = Form(...),
     username:      str           = Form(...),
     password:      str           = Form(...),
-    client_id:     str           = Form(default="twam-web-portal"),
-    client_secret: str           = Form(default="twamsecret"),
+    client_id:     Optional[str] = Form(default=None),
+    client_secret: Optional[str] = Form(default=None),
     scope:         Optional[str] = Form(default=None),
     db: Session = Depends(get_db),
 ):
     if grant_type != "password":
         raise HTTPException(status_code=400, detail="unsupported_grant_type")
-    if client_id != "twam-web-portal" or client_secret != "twamsecret":
+
+    if not _validate_client(client_id, client_secret):
         raise HTTPException(status_code=401, detail="invalid_client")
 
     result = authenticate_user(db, username, password)
@@ -186,14 +206,16 @@ async def connect_token(
         }
         raise HTTPException(
             status_code=400,
-            detail={"error": "invalid_grant",
-                    "error_description": error_map.get(result.error, "Authentication failed.")}
+            detail={
+                "error":             "invalid_grant",
+                "error_description": error_map.get(result.error, "Authentication failed."),
+            },
         )
 
     claims = build_token_claims(db, result.user)
     return TokenResponse(
         access_token=create_access_token(claims),
-        expires_in=EXPIRES_MINUTES * 60
+        expires_in=EXPIRES_MINUTES * 60,
     )
 
 
@@ -266,7 +288,7 @@ async def register_change_password(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# POST /api/register/SendResetPasswordLink  (legacy link-based flow — kept)
+# POST /api/register/SendResetPasswordLink  (legacy link-based flow)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/api/register/SendResetPasswordLink")
@@ -274,7 +296,6 @@ async def register_reset_password(request: ResetPasswordRequest, db: Session = D
     generic_response = {"message": "Reset Password has been sent to mail."}
 
     user = _get_identity_user_by_username(db, request.EmailId)
-    print(f"DEBUG: Looking up '{request.EmailId}' → found: {user is not None}")
     if not user:
         return generic_response
 
@@ -283,7 +304,6 @@ async def register_reset_password(request: ResetPasswordRequest, db: Session = D
         expires_minutes=15,
     )
     reset_link = f"{FRONTEND_URL}/reset-password?token={reset_token}"
-    print(f"DEBUG: Reset link generated: {reset_link}")
 
     full_name = f"{user['first_name']} {user['last_name']}".strip() or user["email"]
     sent = send_email(db, EmailCreate(
@@ -306,118 +326,87 @@ async def register_reset_password(request: ResetPasswordRequest, db: Session = D
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# POST /api/register/SendForgotPasswordOtp  ← NEW
-# Step 1: Generate a 6-digit OTP, store it in memory, and email it.
+# POST /api/register/SendForgotPasswordOtp  (step 1)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/api/register/SendForgotPasswordOtp")
 async def send_forgot_password_otp(request: OtpRequest, db: Session = Depends(get_db)):
-    """
-    Looks up the user by email, generates a 6-digit OTP valid for 10 minutes,
-    stores it in the in-memory OTP store, and sends it via email.
-    Always returns the same generic message to prevent email enumeration.
-    """
     generic_response = {"message": "If this email is registered, an OTP has been sent."}
 
-    # Normalise key
     email_key = request.EmailId.strip().lower()
-
-    # Look up user — if not found return generic (no enumeration)
-    user = _get_identity_user_by_username(db, request.EmailId.strip())
+    user      = _get_identity_user_by_username(db, request.EmailId.strip())
     if not user:
-        print(f"DEBUG OTP: User not found for '{request.EmailId}'")
         return generic_response
 
-    # Generate OTP and store with expiry
     otp = _generate_otp(6)
     _otp_store[email_key] = {
         "otp":        otp,
         "expires_at": datetime.now(timezone.utc) + timedelta(minutes=OTP_TTL_MINUTES),
         "attempts":   0,
     }
-    print(f"DEBUG OTP: Generated OTP {otp} for {email_key} (expires in {OTP_TTL_MINUTES} min)")
 
-    # Build email
-    full_name = f"{user['first_name']} {user['last_name']}".strip() or user["email"]
-    html_body = _otp_email_html(full_name, otp)
-    plain_body = _otp_email_plain(full_name, otp)
+    full_name  = f"{user['first_name']} {user['last_name']}".strip() or user["email"]
+    html_body  = _otp_email_html(full_name, otp)
 
-    # Try HTML email first; send_email sends plain text, so we embed HTML as message
     sent = send_email(db, EmailCreate(
         name    = full_name,
         email   = user["email"],
-        subject = f"Your TWAM Password Reset OTP — {otp}",   # OTP in subject as fallback
-        message = html_body,   # send_email wraps this in MIMEText("plain") — see note below
+        subject = f"Your TWAM Password Reset OTP — {otp}",
+        message = html_body,
         filename=None, isFile=False, data=None,
     ))
 
     if not sent:
-        # Remove OTP from store so user can retry immediately
         _otp_store.pop(email_key, None)
         raise HTTPException(
             status_code=500,
-            detail="Failed to send OTP email. Please try again later."
+            detail="Failed to send OTP email. Please try again later.",
         )
 
     return generic_response
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# POST /api/register/VerifyForgotPasswordOtp  ← NEW
-# Step 2: Validate OTP → return a short-lived JWT reset token.
+# POST /api/register/VerifyForgotPasswordOtp  (step 2)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/api/register/VerifyForgotPasswordOtp")
 async def verify_forgot_password_otp(request: OtpVerifyRequest, db: Session = Depends(get_db)):
-    """
-    Validates the OTP submitted by the user.
-    On success: clears the OTP from store, returns a 15-minute password-reset JWT.
-    On failure: increments attempt counter; locks out after OTP_MAX_ATTEMPTS bad attempts.
-    """
     email_key = request.EmailId.strip().lower()
 
-    # 1. Look up OTP record
     record = _otp_store.get(email_key)
     if not record:
         raise HTTPException(
             status_code=400,
-            detail="No OTP was requested for this email, or it has already been used."
+            detail="No OTP was requested for this email, or it has already been used.",
         )
 
-    # 2. Check expiry
     if datetime.now(timezone.utc) > record["expires_at"]:
         _otp_store.pop(email_key, None)
         raise HTTPException(status_code=400, detail="OTP has expired. Please request a new one.")
 
-    # 3. Check max attempts
     if record["attempts"] >= OTP_MAX_ATTEMPTS:
         _otp_store.pop(email_key, None)
         raise HTTPException(
             status_code=400,
-            detail="Too many incorrect attempts. Please request a new OTP."
+            detail="Too many incorrect attempts. Please request a new OTP.",
         )
 
-    # 4. Verify OTP value
     submitted = request.Otp.strip()
     if submitted != record["otp"]:
         record["attempts"] += 1
         remaining = OTP_MAX_ATTEMPTS - record["attempts"]
-        print(f"DEBUG OTP: Wrong OTP for {email_key}. Attempt {record['attempts']}/{OTP_MAX_ATTEMPTS}")
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid OTP. {remaining} attempt(s) remaining."
+            detail=f"Invalid OTP. {remaining} attempt(s) remaining.",
         )
 
-    # 5. OTP is correct — consume it immediately (single-use)
     _otp_store.pop(email_key, None)
-    print(f"DEBUG OTP: OTP verified for {email_key}")
 
-    # 6. Verify user still exists in DB
     user = _get_identity_user_by_username(db, request.EmailId.strip())
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    # 7. Issue a short-lived password-reset JWT (15 minutes)
     reset_token = create_access_token(
         user_claims={
             "sub":     user["email"],
@@ -435,9 +424,7 @@ async def verify_forgot_password_otp(request: OtpVerifyRequest, db: Session = De
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# POST /api/register/ResetPassword
-# Step 3: Validate the JWT reset token and set the new password.
-# Accepts both the legacy (token-link) and new OTP flow.
+# POST /api/register/ResetPassword  (step 3)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/api/register/ResetPassword")
@@ -445,23 +432,18 @@ async def register_confirm_reset(
     request: ResetPasswordConfirmRequest,
     db: Session = Depends(get_db),
 ):
-    # 1. Decode + validate the reset JWT
     try:
         payload = decode_reset_token(request.Token)
     except Exception as e:
-        print(f"DEBUG: Token decode failed — {e}")
         raise HTTPException(status_code=400, detail="Invalid or expired reset token.")
 
-    # 2. Ensure it's a password-reset token, not a regular login token
     if payload.get("purpose") != "password_reset":
         raise HTTPException(status_code=400, detail="Invalid reset token.")
 
-    # 3. Resolve email — prefer token's own email claim for security
     email = payload.get("email") or payload.get("sub") or (request.EmailId or "").strip()
     if not email:
         raise HTTPException(status_code=400, detail="Cannot determine user email from token.")
 
-    # 4. Reset the password
     result = reset_password_with_token(db, email, request.NewPassword)
     if not result["succeeded"]:
         raise HTTPException(status_code=400, detail={"errors": result["errors"]})

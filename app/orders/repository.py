@@ -1,6 +1,7 @@
 import os
 import random
 import json
+import re
 from datetime import datetime, timezone
 from typing import Optional, List
 from sqlalchemy.orm import Session
@@ -25,6 +26,13 @@ def generate_order_item_number() -> str:
     return f"ORDI{random.randint(1000, 9999)}"
 
 
+def _parse_min_order_value(order_value_range: Optional[str]) -> Optional[float]:
+    if not order_value_range:
+        return None
+    match = re.search(r"(\d+(?:\.\d+)?)", str(order_value_range).replace(",", ""))
+    return float(match.group(1)) if match else None
+
+
 # apply_filters, apply_ordering, apply_pagination imported from app.shared.filters
 
 
@@ -42,6 +50,44 @@ def _get_address(db: Session, address_id):
             "phone": result[4], "name": result[5]
         }
     return None
+
+
+def _get_owned_address(db: Session, address_id: Optional[int], user_profile_id: Optional[str] = None):
+    if not address_id:
+        return None
+
+    sql = 'SELECT "AddressId","UserProfileId","AddressLine","City","PinCode","Phone","Name" FROM twam."Address" WHERE "AddressId" = :id AND "DeletedInd" = false'
+    params = {"id": address_id}
+
+    if user_profile_id:
+        sql += ' AND "UserProfileId" = :user_profile_id'
+        params["user_profile_id"] = user_profile_id
+
+    result = db.execute(text(sql), params).fetchone()
+    if result:
+        return {
+            "addressId": result[0],
+            "userProfileId": result[1],
+            "addressLine": result[2],
+            "city": result[3],
+            "pinCode": result[4],
+            "phone": result[5],
+            "name": result[6],
+        }
+    return None
+
+
+def _build_address_response(addr: Optional[dict]) -> Optional[dict]:
+    if not addr:
+        return None
+    return {
+        "addressId": addr.get("addressId"),
+        "addressLine": addr.get("addressLine"),
+        "city": addr.get("city"),
+        "pinCode": addr.get("pinCode"),
+        "phone": addr.get("phone"),
+        "name": addr.get("name"),
+    }
 
 
 def _get_order_items_with_details(db: Session, order_ids: List[int], include_reviews: bool = False):
@@ -103,20 +149,167 @@ def _get_order_items_with_details(db: Session, order_ids: List[int], include_rev
     return items
 
 
-def _get_delivery_info(db: Session, shipping_type_id):
+def _get_delivery_info(db: Session, shipping_type_id, order_subtotal: Optional[float] = None):
     if not shipping_type_id:
         return None
     row = db.execute(
-        text('SELECT "DeliveryChargeId","DeliveryCharges","Days","IsFree","Description" FROM twam."DeliveryCharge" WHERE "ShippingTypeId" = :id AND "DeletedInd" = false LIMIT 1'),
+        text('SELECT "DeliveryChargeId","DeliveryCharges","Days","IsFree","Description","OrderValueRange" FROM twam."DeliveryCharge" WHERE "ShippingTypeId" = :id AND "DeletedInd" = false LIMIT 1'),
         {"id": shipping_type_id}
     ).fetchone()
     if row:
+        min_order_value = _parse_min_order_value(row[5])
+        subtotal = float(order_subtotal or 0)
+        is_eligible = min_order_value is None or subtotal >= min_order_value
+        unlock_amount = round(max((min_order_value or 0) - subtotal, 0), 2) if min_order_value is not None else 0.0
         return {
             "deliveryChargeId": row[0],
-            "deliveryCharges": float(row[1]) if row[1] else None,
-            "days": row[2], "isFree": row[3], "description": row[4]
+            "deliveryCharges": float(row[1]) if row[1] is not None else None,
+            "days": row[2],
+            "isFree": row[3],
+            "description": row[4],
+            "orderValueRange": row[5],
+            "minOrderValue": min_order_value,
+            "isEligible": is_eligible,
+            "unlockAmount": unlock_amount,
         }
     return None
+
+
+def _normalize_order_addresses_and_delivery(db: Session, data):
+    user_profile_id = getattr(data, "userProfileId", None)
+    shipping_address_id = getattr(data, "shippingAddressId", None)
+    billing_address_id = getattr(data, "billingAddressId", None) or shipping_address_id
+
+    if shipping_address_id:
+        shipping_address = _get_owned_address(db, shipping_address_id, user_profile_id)
+        if not shipping_address:
+            raise ValueError("Shipping address not found for this user.")
+    else:
+        shipping_address = None
+
+    if billing_address_id:
+        billing_address = _get_owned_address(db, billing_address_id, user_profile_id)
+        if not billing_address:
+            raise ValueError("Billing address not found for this user.")
+    else:
+        billing_address = shipping_address
+
+    if getattr(data, "shippingTypeId", None):
+        delivery_info = _get_delivery_info(
+            db,
+            getattr(data, "shippingTypeId", None),
+            getattr(data, "subTotal", None),
+        )
+        if delivery_info and delivery_info.get("isEligible") is False:
+            min_value = delivery_info.get("minOrderValue")
+            raise ValueError(f"This shipping option is available only for orders above {min_value:.0f}.")
+        if getattr(data, "deliveryCharge", None) is None and delivery_info and delivery_info.get("deliveryCharges") is not None:
+            data.deliveryCharge = delivery_info["deliveryCharges"]
+
+    data.shippingAddressId = shipping_address["addressId"] if shipping_address else None
+    data.billingAddressId = billing_address["addressId"] if billing_address else None
+
+    return shipping_address, billing_address
+
+
+def _get_cart_checkout_items(db: Session, cart_ids: List[int], user_profile_id: str) -> List[dict]:
+    if not cart_ids:
+        return []
+
+    ids_str = ",".join(str(int(cart_id)) for cart_id in cart_ids)
+    rows = db.execute(text(f"""
+        SELECT
+            c."CartId",
+            c."ProductId",
+            c."ProductVariantId",
+            c."ProductVariantDetailId",
+            c."Quantity",
+            p."Name",
+            pvd."FinalPrice",
+            pvd."TaxAmount",
+            (
+                SELECT CONCAT('{BASE_URL}', pi2."FilePath")
+                FROM twam."ProductImage" pi2
+                WHERE pi2."ProductVariantId" = c."ProductVariantId"
+                  AND pi2."DeletedInd" = false
+                  AND pi2."FilePath" IS NOT NULL
+                  AND pi2."FilePath" != ''
+                LIMIT 1
+            ) AS image
+        FROM twam."Cart" c
+        LEFT JOIN twam."Products" p ON p."ProductId" = c."ProductId"
+        LEFT JOIN twam."ProductVariantDetail" pvd ON pvd."ProductVariantDetailId" = c."ProductVariantDetailId"
+        WHERE c."CartId" IN ({ids_str})
+          AND c."UserProfileId" = :user_profile_id
+          AND c."DeletedInd" = false
+          AND (c."IsOrdered" IS NULL OR c."IsOrdered" = false)
+    """), {"user_profile_id": user_profile_id}).fetchall()
+
+    items = []
+    for row in rows:
+        quantity = int(row[4] or 0)
+        unit_price = float(row[6]) if row[6] is not None else 0.0
+        unit_tax = float(row[7]) if row[7] is not None else 0.0
+        items.append({
+            "cartId": row[0],
+            "productId": row[1],
+            "productVariantId": row[2],
+            "productVariantDetailId": row[3],
+            "quantity": quantity,
+            "productName": row[5],
+            "unitPrice": unit_price,
+            "taxAmount": round(unit_tax * quantity, 2),
+            "lineTotal": round(unit_price * quantity, 2),
+            "productImage": row[8] or "",
+        })
+    return items
+
+
+def get_checkout_summary(db: Session, user_profile_id: str, data) -> dict:
+    if not user_profile_id:
+        raise ValueError("User profile is required.")
+
+    cart_ids = list(dict.fromkeys(data.cartIds or []))
+    if not cart_ids:
+        raise ValueError("At least one cart item is required.")
+
+    shipping_address = _get_owned_address(db, data.shippingAddressId, user_profile_id) if data.shippingAddressId else None
+    if data.shippingAddressId and not shipping_address:
+        raise ValueError("Shipping address not found for this user.")
+
+    billing_source_id = data.billingAddressId or data.shippingAddressId
+    billing_address = _get_owned_address(db, billing_source_id, user_profile_id) if billing_source_id else shipping_address
+    if billing_source_id and not billing_address:
+        raise ValueError("Billing address not found for this user.")
+
+    cart_items = _get_cart_checkout_items(db, cart_ids, user_profile_id)
+    if len(cart_items) != len(cart_ids):
+        raise ValueError("Some cart items were not found for this user.")
+
+    sub_total = round(sum(item["lineTotal"] for item in cart_items), 2)
+    tax_amount = round(sum(item["taxAmount"] for item in cart_items), 2)
+    delivery_info = _get_delivery_info(db, data.shippingTypeId, sub_total)
+    if delivery_info and delivery_info.get("isEligible") is False:
+        min_value = delivery_info.get("minOrderValue")
+        raise ValueError(f"This shipping option is available only for orders above {min_value:.0f}.")
+    delivery_charge = round(float(delivery_info["deliveryCharges"]) if delivery_info and delivery_info.get("deliveryCharges") is not None else 0.0, 2)
+    coupon_amount = round(float(data.couponAmount or 0), 2)
+    total_amount = round(sub_total + delivery_charge - coupon_amount, 2)
+
+    return {
+        "shippingAddress": _build_address_response(shipping_address),
+        "billingAddress": _build_address_response(billing_address),
+        "deliveryInfo": delivery_info,
+        "shippingTypeId": data.shippingTypeId,
+        "cartItems": cart_items,
+        "itemCount": len(cart_items),
+        "totalQuantity": sum(item["quantity"] for item in cart_items),
+        "subTotal": sub_total,
+        "taxAmount": tax_amount,
+        "deliveryCharge": delivery_charge,
+        "couponAmount": coupon_amount,
+        "totalAmount": total_amount,
+    }
 
 
 # ── Check Out of Stock ────────────────────────────────────────────────────────
@@ -148,11 +341,44 @@ def create_order(db: Session, data) -> dict:
         ]
 
     order_items_input = data.orderItems or []
+    if not order_items_input and getattr(data, "cartId", None):
+        summary = get_checkout_summary(
+            db,
+            getattr(data, "userProfileId", None) or "",
+            type("CheckoutPayload", (), {
+                "cartIds": getattr(data, "cartId", None) or [],
+                "shippingAddressId": getattr(data, "shippingAddressId", None),
+                "billingAddressId": getattr(data, "billingAddressId", None),
+                "shippingTypeId": getattr(data, "shippingTypeId", None),
+                "couponAmount": getattr(data, "couponAmount", None) or 0,
+            })()
+        )
+        if getattr(data, "subTotal", None) is None:
+            data.subTotal = summary["subTotal"]
+        if getattr(data, "taxAmount", None) is None:
+            data.taxAmount = summary["taxAmount"]
+        if getattr(data, "deliveryCharge", None) is None:
+            data.deliveryCharge = summary["deliveryCharge"]
+        if getattr(data, "totalAmount", None) is None:
+            data.totalAmount = summary["totalAmount"]
+        order_items_input = [
+            type("OrderItem", (), {
+                "productVariantDetailId": item["productVariantDetailId"],
+                "productVariantId": item["productVariantId"],
+                "productId": item["productId"],
+                "quantity": item["quantity"],
+                "price": item["unitPrice"],
+            })()
+            for item in summary["cartItems"]
+        ]
+        data.orderItems = order_items_input
     variant_ids = list({i.productVariantDetailId for i in order_items_input if i.productVariantDetailId})
 
     out_of_stock = check_out_of_stock(db, variant_ids)
     if out_of_stock:
         return {"outOfStockProducts": out_of_stock}
+
+    _normalize_order_addresses_and_delivery(db, data)
 
     order = Orders(
         orderNumber=generate_order_number(),
@@ -172,6 +398,9 @@ def create_order(db: Session, data) -> dict:
         taxAmount=getattr(data, "taxAmount", None),
         subTotal=getattr(data, "subTotal", None),
         isWhatsappNotification=getattr(data, "isWhatsappNotification", None),
+        paymentMethod=getattr(data, "paymentMethod", None),
+        paymentAccount=getattr(data, "paymentAccount", None),
+        platform=getattr(data, "platform", None),
     )
     db.add(order)
     db.flush()  # get auto-generated orderId
@@ -211,6 +440,13 @@ def create_order(db: Session, data) -> dict:
             )
             db.add(item)
 
+    # Add initial tracking status
+    db.add(OrderTrackingStatus(
+        orderId=order_id,
+        status="Pending",
+        createdDate=datetime.now(timezone.utc)
+    ))
+    
     db.commit()
 
     # Mark cart items as ordered
@@ -222,6 +458,13 @@ def create_order(db: Session, data) -> dict:
             f"UPDATE twam.\"Cart\" SET \"IsOrdered\" = true WHERE \"UserProfileId\" = '{user_profile_id}' AND \"CartId\" IN ({ids_str}) AND \"DeletedInd\" = false"
         ))
         db.commit()
+
+    # Send order confirmation notification (email + SMS)
+    try:
+        from app.ekart.notifications import send_order_placed_notification
+        send_order_placed_notification(db, order_id)
+    except Exception as e:
+        print(f"[Order] Notification failed for order {order_id}: {e}")
 
     # TODO: Integrate IPaymentService.CreateOrderRequestAsync
     return {"orderId": order_id, "paymentProcessUrl": None}
@@ -271,6 +514,11 @@ def create_guest_order(db: Session, data) -> dict:
     """), address)
     address_id = result.fetchone()[0]
     db.commit()
+
+    if data.shippingTypeId and data.deliveryCharge is None:
+        delivery_info = _get_delivery_info(db, data.shippingTypeId)
+        if delivery_info and delivery_info.get("deliveryCharges") is not None:
+            data.deliveryCharge = delivery_info["deliveryCharges"]
 
     order = Orders(
         orderNumber=generate_order_number(),
@@ -368,6 +616,14 @@ def cancel_order(db: Session, order_id: int, is_refund: bool, reason: str, platf
 
     # TODO: Integrate IPaymentService.RefundPaymentAsync
     db.commit()
+    
+    # Send cancellation notification
+    try:
+        from app.ekart.notifications import send_order_cancelled_notification
+        send_order_cancelled_notification(db, order_id, reason)
+    except Exception as e:
+        print(f"[Order] Cancel notification failed for order {order_id}: {e}")
+    
     return True
 
 
@@ -418,6 +674,14 @@ def create_return_order(db: Session, data) -> bool:
         ))
 
         db.commit()
+        
+        # Send return initiated notification
+        try:
+            from app.ekart.notifications import send_return_initiated_notification
+            send_return_initiated_notification(db, data.orderId)  # Notify for original order
+        except Exception as e:
+            print(f"[Order] Return notification failed for order {order_id}: {e}")
+        
         return True
     except Exception:
         db.rollback()
@@ -600,6 +864,41 @@ def get_order_tracking(db: Session, order_id: int) -> dict:
         steps.append({"title": "Order Failed",    "description": f"Order {order.orderNumber} failed.", "date": _fmt("Failed"),      "status": "done"})
     if "Confirmed"        in status_map:
         steps.append({"title": "Order Confirmed", "description": "Your order has been placed.",  "date": _fmt("Confirmed"),         "status": "done"})
+
+    # Shipped / in-transit / delivered — derived from Orders table directly
+    if order.isShipped and order.state not in ("Cancelled", "Returned"):
+        tracking_note = f"Tracking ID: {order.trackingId}" if order.trackingId else "Your order is on its way."
+        if order.state == "Delivered":
+            steps.append({
+                "title": "Shipped",
+                "description": tracking_note,
+                "date": None,
+                "status": "done"
+            })
+            delivered_date = (
+                order.deliveredDate.strftime("%Y-%m-%d %H:%M:%S")
+                if order.deliveredDate else None
+            )
+            steps.append({
+                "title": "Delivered",
+                "description": "Your order has been delivered.",
+                "date": delivered_date,
+                "status": "done"
+            })
+        else:
+            steps.append({
+                "title": "Shipped",
+                "description": tracking_note,
+                "date": None,
+                "status": "done"
+            })
+            steps.append({
+                "title": "Out for delivery",
+                "description": "Your order is on its way.",
+                "date": None,
+                "status": "active"
+            })
+
     if "Return Initiated" in status_map:
         steps.append({"title": "Return Initiated","description": "Order return initiated.",      "date": _fmt("Return Initiated"),  "status": "done"})
     if order.state == "Cancelled":
@@ -673,3 +972,68 @@ def get_return_order_items(db: Session, order_id: int, filters, order_ascending,
         }],
         "parameters": None
     }
+
+
+# ── Update Order Status (Admin) ───────────────────────────────────────────────
+
+def update_order_status(
+    db: Session, 
+    order_id: int, 
+    new_state: str,
+    tracking_id: str = None,
+    delivery_agent: str = None,
+) -> bool:
+    """
+    Update order status and send appropriate notifications.
+    Used by admin panel and Ekart webhooks.
+    """
+    order = db.query(Orders).filter(
+        Orders.orderId == order_id,
+        Orders.deletedInd == False
+    ).first()
+    
+    if not order:
+        return False
+    
+    old_state = order.state
+    order.state = new_state
+    order.modifiedDate = datetime.now(timezone.utc)
+    
+    # Update tracking info if provided
+    if tracking_id:
+        order.trackingId = tracking_id
+        order.isShipped = True
+    
+    if delivery_agent:
+        order.deliveryAgent = delivery_agent
+    
+    # Set delivered date
+    if new_state == "Delivered" and not order.deliveredDate:
+        order.deliveredDate = datetime.now(timezone.utc)
+    
+    # Add tracking status record
+    db.add(OrderTrackingStatus(
+        orderId=order_id,
+        status=new_state,
+        createdDate=datetime.now(timezone.utc)
+    ))
+    
+    db.commit()
+    
+    # Send notifications based on state change
+    if old_state != new_state:
+        try:
+            from app.ekart.notifications import send_order_status_notification
+            import asyncio
+            
+            # Run async notification in sync context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(send_order_status_notification(db, order_id, new_state))
+            finally:
+                loop.close()
+        except Exception as e:
+            print(f"[Order] Status notification failed for order {order_id}: {e}")
+    
+    return True

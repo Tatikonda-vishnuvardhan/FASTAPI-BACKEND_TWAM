@@ -132,6 +132,7 @@ class UserProductListItem(BaseModel):
     productId:          Optional[int]   = None
     productCode:        Optional[str]   = None
     fabricId:           Optional[int]   = None
+    sizeId:             Optional[int]   = None
     size:               Optional[Any]   = None
     color:              Optional[str]   = None
     stockQuantity:      Optional[int]   = None
@@ -141,7 +142,9 @@ class UserProductListItem(BaseModel):
     finalPrice:         Optional[float] = None
     userProfileId:      Optional[str]   = None
     state:              Optional[str]   = None
+    cupSizeId:          Optional[int]   = None
     cupSize:            Optional[Any]   = None
+    isCupSize:          Optional[bool]  = None
     isBestSeller:       Optional[bool]  = None
     totalCount:         Optional[int]   = None
     price:              Optional[float] = None

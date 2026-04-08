@@ -6,8 +6,11 @@ class TokenRequest(BaseModel):
     grant_type:    str
     username:      str
     password:      str
-    client_id:     str = "twam-web-portal"
-    client_secret: str = "twamsecret"
+    # client_id and client_secret are accepted from the request but validated
+    # against AppSettings at runtime — defaults removed to avoid leaking values
+    # in OpenAPI schema docs.
+    client_id:     Optional[str] = None
+    client_secret: Optional[str] = None
     scope:         Optional[str] = None
 
 

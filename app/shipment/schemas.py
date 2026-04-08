@@ -32,6 +32,9 @@ class CreateShipmentRequest(BaseModel):
     packagingTemplate:    Optional[str]   = None
     userProfileId:        Optional[str]   = None
     state:                Optional[str]   = None
+    # Used as a manual stopgap until Ekart is integrated.
+    # Admin can paste the AWB from the Ekart portal here.
+    manualTrackingId:     Optional[str]   = None
 
 
 # ── Create Return Shipment (Ekart) ─────────────────────────────────────────────

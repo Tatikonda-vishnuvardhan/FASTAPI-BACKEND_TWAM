@@ -11,7 +11,7 @@ from sqlalchemy import text
 
 from .security import (
     verify_password, generate_sha256_hash_with_salt,
-    PASSWORD_CIPHER, _aspnet_hash_password, _decrypt_client_password
+    _get_password_cipher, _aspnet_hash_password, _decrypt_client_password,
 )
 from .schemas import RegisterUserRequest
 
@@ -172,14 +172,14 @@ def create_identity_user(db: Session, request: RegisterUserRequest) -> dict:
             ]}
 
     plain_password = request.Password or "Admin@12345"
-    twam_hash      = generate_sha256_hash_with_salt(plain_password, PASSWORD_CIPHER)
+    # _get_password_cipher() reads from AppSettings cache at runtime
+    twam_hash      = generate_sha256_hash_with_salt(plain_password, _get_password_cipher())
     stored_hash    = _aspnet_hash_password(twam_hash)
 
     user_id  = str(uuid.uuid4())
     role_id  = request.RoleId if request.RoleId else 2
     now      = datetime.now(timezone.utc)
 
-    # Full INSERT with all columns including new ones
     db.execute(
         text(f"""
             INSERT INTO {IDENTITY_USER_TABLE}
@@ -268,12 +268,13 @@ def reset_password_with_token(db: Session, email: str, new_password: str) -> dic
         return {"succeeded": False, "errors": [{"code": "NotFound", "description": "User not found."}]}
 
     try:
-        new_plain   = _decrypt_client_password(new_password)
+        new_plain = _decrypt_client_password(new_password)
     except Exception:
-        # If decryption fails, treat as plain text (e.g. direct API call / testing)
-        new_plain   = new_password
+        # If decryption fails treat as plain text (direct API call / testing)
+        new_plain = new_password
 
-    new_twam    = generate_sha256_hash_with_salt(new_plain, PASSWORD_CIPHER)
+    # _get_password_cipher() reads from AppSettings cache at runtime
+    new_twam    = generate_sha256_hash_with_salt(new_plain, _get_password_cipher())
     new_db_hash = _aspnet_hash_password(new_twam)
 
     db.execute(
@@ -308,7 +309,8 @@ def change_password(db: Session, email_id: str, current_password: str, new_passw
         return {"succeeded": False, "errors": [{"code": "PasswordMismatch", "description": "Current password is incorrect."}]}
 
     new_plain   = _decrypt_client_password(new_password)
-    new_twam    = generate_sha256_hash_with_salt(new_plain, PASSWORD_CIPHER)
+    # _get_password_cipher() reads from AppSettings cache at runtime
+    new_twam    = generate_sha256_hash_with_salt(new_plain, _get_password_cipher())
     new_db_hash = _aspnet_hash_password(new_twam)
 
     db.execute(

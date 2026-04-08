@@ -1,11 +1,11 @@
 """
 database.py
 ────────────
-SQLAlchemy session setup.
+SQLAlchemy engine, session factory, and FastAPI DB dependency.
 
-CHANGE: Schema creation moved OUT of module-level code into
-app lifespan startup event in main.py.
-This prevents schema-creation running during tests/imports.
+Startup sequence (called from main.py lifespan):
+  1. create_schemas() — CREATE SCHEMA IF NOT EXISTS for each PG schema
+  2. Base.metadata.create_all() — creates tables from all imported models
 """
 
 from sqlalchemy import create_engine, text
@@ -16,9 +16,9 @@ DATABASE_URL = settings.database_url
 
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True,      # detect stale connections
-    pool_size=10,            # connection pool size
-    max_overflow=20,         # extra connections under load
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -36,55 +36,10 @@ def get_db():
 
 def create_schemas():
     """
-    Create required PostgreSQL schemas.
-    Called ONCE from main.py lifespan — not on import.
+    Ensure all required PostgreSQL schemas exist.
+    Called once from main.py lifespan before create_all().
     """
     with engine.connect() as conn:
         for schema in ("mdm", "twam", "payment", "shipment", "auth", "email"):
             conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
-        conn.commit()
-
-
-def run_migrations():
-    """
-    Idempotent column-level migrations run after create_all().
-    Uses information_schema so each ALTER is skipped if the column
-    already exists — safe to run on every startup.
-    """
-    migrations = [
-        # ProductReview: optional user photo for testimonial display
-        {
-            "schema": "twam",
-            "table":  "ProductReview",
-            "column": "Photo",
-            "type":   "VARCHAR",
-        },
-        # Products: stock number field added to model after initial table creation
-        {
-            "schema": "twam",
-            "table":  "Products",
-            "column": "StockNo",
-            "type":   "VARCHAR",
-        },
-    ]
-
-    with engine.connect() as conn:
-        for m in migrations:
-            exists = conn.execute(
-                text(
-                    "SELECT 1 FROM information_schema.columns "
-                    "WHERE table_schema = :schema "
-                    "  AND table_name   = :table "
-                    "  AND column_name  = :column"
-                ),
-                {"schema": m["schema"], "table": m["table"], "column": m["column"]},
-            ).fetchone()
-
-            if not exists:
-                conn.execute(
-                    text(
-                        f'ALTER TABLE {m["schema"]}."{m["table"]}" '
-                        f'ADD COLUMN "{m["column"]}" {m["type"]} NULL'
-                    )
-                )
         conn.commit()

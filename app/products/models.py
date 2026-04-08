@@ -9,7 +9,6 @@ class Products(Base):
 
     productId      = Column("ProductId",       BigInteger, primary_key=True, index=True, autoincrement=True)
     productCode    = Column("ProductCode",      String,     nullable=True)
-    stockno = Column("StockNo",          String,     nullable=True)
     name           = Column("Name",             String,     nullable=True)
     description    = Column("Description",      String,     nullable=True)
     categoryId     = Column("CategoryId",       BigInteger, nullable=True)

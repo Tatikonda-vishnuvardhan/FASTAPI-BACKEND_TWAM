@@ -28,11 +28,19 @@ def get_cart_list(
     Order_Property: Optional[str] = Query(None, alias="Order.Property"),
     Page_Index: Optional[int] = Query(None, alias="Page.Index", ge=1),
     Page_Size: Optional[int] = Query(None, alias="Page.Size", ge=1),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
+    filters = parse_filters(Filters) or []
+    if current_user.role_id not in Roles.STAFF:
+        filters.append({
+            "property": "userProfileId",
+            "comparison": "eq",
+            "value": current_user.user_id,
+        })
     return repository.get_cart_list(
         db=db,
-        filters=parse_filters(Filters),
+        filters=filters or None,
         order_ascending=Order_Ascending,
         order_property=Order_Property,
         page_index=Page_Index,
@@ -42,7 +50,11 @@ def get_cart_list(
 
 # ── POST /api/Cart — IMPROVED ─────────────────────────────────────────────────
 @router.post("/", status_code=201)
-def create_cart(cart: schemas.CartCreate, db: Session = Depends(get_db)):
+def create_cart(
+    cart: schemas.CartCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     IMPROVED: Returns detailed response with status info.
     
@@ -52,13 +64,19 @@ def create_cart(cart: schemas.CartCreate, db: Session = Depends(get_db)):
     - quantity: Current quantity after operation
     - message: Human-readable message
     """
+    if not cart.userProfileId:
+        cart.userProfileId = current_user.user_id
     result = repository.create_cart(db, cart)
     return result
 
 
 # ── POST /api/Cart/BulkCart — IMPROVED ────────────────────────────────────────
 @router.post("/BulkCart", status_code=200)
-def bulk_cart(command: schemas.BulkCartCreate, db: Session = Depends(get_db)):
+def bulk_cart(
+    command: schemas.BulkCartCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     IMPROVED: Returns detailed sync statistics.
     
@@ -76,15 +94,20 @@ def bulk_cart(command: schemas.BulkCartCreate, db: Session = Depends(get_db)):
     result = repository.create_bulk_cart(
         db, 
         command.createCartCommands, 
-        command.userProfileId or ""
+        command.userProfileId or current_user.user_id
     )
     return result
 
 
 # ── PUT /api/Cart/{Id} ────────────────────────────────────────────────────────
 @router.put("/{cart_id}")
-def update_cart(cart_id: int, command: schemas.CartUpdate, db: Session = Depends(get_db)):
-    result = repository.update_cart(db, cart_id, command.quantity)
+def update_cart(
+    cart_id: int,
+    command: schemas.CartUpdate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    result = repository.update_cart(db, cart_id, command.quantity, current_user.user_id, current_user.role_id in Roles.STAFF)
     if result is None:
         raise HTTPException(status_code=404, detail="Cart item not found.")
     return {"cartId": result, "message": "Cart updated successfully"}
@@ -92,15 +115,23 @@ def update_cart(cart_id: int, command: schemas.CartUpdate, db: Session = Depends
 
 # ── DELETE /api/Cart/{Id} ─────────────────────────────────────────────────────
 @router.delete("/{cart_id}", status_code=204)
-def delete_cart(cart_id: int, db: Session = Depends(get_db)):
-    result = repository.delete_cart(db, cart_id)
+def delete_cart(
+    cart_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    result = repository.delete_cart(db, cart_id, current_user.user_id, current_user.role_id in Roles.STAFF)
     if not result:
         raise HTTPException(status_code=404, detail="Cart item not found.")
 
 
 # ── POST /api/Cart/DeleteMutiple ──────────────────────────────────────────────
 @router.post("/DeleteMutiple", status_code=204)
-def delete_multiple(ids: List[int], db: Session = Depends(get_db)):
-    result = repository.delete_multiple_carts(db, ids)
+def delete_multiple(
+    ids: List[int],
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    result = repository.delete_multiple_carts(db, ids, current_user.user_id, current_user.role_id in Roles.STAFF)
     if not result:
         raise HTTPException(status_code=404, detail="No cart items found for the given IDs.")

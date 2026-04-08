@@ -3,12 +3,13 @@ main.py
 ────────
 FastAPI application entry point.
 
-Changes from original:
-  - CORS allow_origins now read from settings (CORS_ORIGINS env var)
-    instead of hardcoded ["*"]
-  - Schema creation moved to @app.on_event("startup") — not on import
-  - Base.metadata.create_all also in startup (dev only)
-  - Removed unused OAuth2PasswordBearer import from top level
+Changes vs previous version:
+  - app/brand/router.py now exports a single `router` (no protected_router split).
+    GET endpoints are public; POST/PUT/DELETE require auth via per-route
+    dependencies=[Depends(get_current_user)] inside the router file itself.
+  - AppSettings seeded and cache loaded at startup so every secret that was
+    previously hardcoded (OAuth client_id/secret, password cipher, AES key,
+    webhook secret) is read from the DB at runtime.
 """
 
 import os
@@ -18,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from config import settings
-from database import Base, engine, create_schemas, run_migrations
+from database import Base, engine, create_schemas
 
 # ── Models (keep imports so create_all picks them up) ─────────────────────────
 from app.address.models              import Address
@@ -26,7 +27,7 @@ from app.blog.models                 import Blog
 from app.brand.models                import Brand
 from app.cart.models                 import Cart
 from app.category.models             import Category
-from app.common.models               import ProductAudit, ProductVariantAudit, ProductVariantDetailAudit
+from app.common.models               import ProductAudit, ProductVariantAudit, ProductVariantDetailAudit, AppSettings
 from app.country.models              import Country
 from app.coupons.models              import Coupons
 from app.cupsize.models              import CupSize
@@ -48,6 +49,7 @@ from app.products.models             import Products
 from app.productvariant.models       import ProductVariant, ProductImage
 from app.productvariantdetail.models import ProductVariantDetail
 from app.shipment.models             import Shipment
+from app.shipment.config_model       import ShipmentConfigurations
 from app.shippingtype.models         import ShippingType
 from app.size.models                 import Size
 from app.state.models                import State
@@ -66,21 +68,38 @@ from app.newsletter.models           import Newsletter
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Run startup/shutdown logic."""
-    # Create schemas first, then tables
+    # 1. Create PostgreSQL schemas
     create_schemas()
+
+    # 2. Create all tables from SQLAlchemy models
     Base.metadata.create_all(bind=engine)
-    run_migrations()
+
+    # 3. Uploads directory
     os.makedirs("uploads", exist_ok=True)
-    # Auto-create ProductColor table and populate hex values on every startup
-    from app.shared.color_init import init_product_color_table
+
     from database import SessionLocal
     db = SessionLocal()
     try:
+        # 4. Seed AppSettings defaults (inserts missing rows, skips existing)
+        #    This ensures oauth_client_id, oauth_client_secret, password_cipher,
+        #    client_encrypt_key, and ekart_webhook_secret all have rows before
+        #    any request is served.
+        from app.shared.app_settings import seed_defaults, load_settings
+        seed_defaults(db)
+
+        # 5. Load AppSettings into the in-process cache so every request can
+        #    call get_setting() without hitting the DB each time.
+        load_settings(db)
+
+        # 6. Auto-create ProductColor table and populate hex values
+        from app.shared.color_init import init_product_color_table
         init_product_color_table(db)
+
     finally:
         db.close()
+
     yield
-    # shutdown logic here if needed
+    # Shutdown logic here if needed
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -95,7 +114,7 @@ All protected endpoints require a Bearer JWT token.
 
 ### How to get a token:
 1. `POST /connect/token` with form: `grant_type=password`, `username`, `password`,
-   `client_id=twam-web-portal`, `client_secret=twamsecret`
+   `client_id`, `client_secret` (values stored in AppSettings)
 2. Copy `access_token` from response
 3. Click **Authorize** above → paste the token
 
@@ -115,8 +134,6 @@ All protected endpoints require a Bearer JWT token.
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-# Origins loaded from CORS_ORIGINS env var (comma-separated).
-# For mobile (Capacitor): add "capacitor://localhost" to CORS_ORIGINS in .env
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
@@ -129,7 +146,7 @@ app.add_middleware(
 from app.auth.router                 import router as auth_router
 from app.connect.router              import router as connect_router
 from app.blog.router                 import router as blog_router
-from app.brand.router                import router as brand_router
+from app.brand.router                import router as brand_router   # single router, no protected_router split
 from app.category.router             import router as category_router
 from app.coupons.router              import router as coupons_router
 from app.deliverycharge.router       import router as deliverycharge_router
@@ -172,9 +189,14 @@ from app.supportrequest.router       import router as supportrequest_router
 from app.taxhsncode.router           import router as taxhsncode_router
 from app.userrole.router             import router as userrole_router
 from app.wishlist.router             import router as wishlist_router
+from app.bulkimport.router           import router as bulkimport_router
+
+# ── Ekart Logistics Integration ───────────────────────────────────────────────
+from app.ekart.router                import router as ekart_router
+from app.ekart.webhooks              import router as ekart_webhook_router
 
 # ── Register all routers ──────────────────────────────────────────────────────
-for router in (
+for _router in (
     auth_router, connect_router, blog_router, brand_router, category_router,
     coupons_router, deliverycharge_router, mdm_router, productvariant_router,
     pvd_router, userdashboard_router, userreview_router, email_router,
@@ -185,10 +207,11 @@ for router in (
     productreview_router, products_router, report_router, shipment_router,
     shippingtype_router, size_router, state_router, stores_router,
     supplierinfo_router, supportrequest_router, taxhsncode_router,
-    userrole_router, wishlist_router,
+    userrole_router, wishlist_router, bulkimport_router,
     newsletter_router,
+    ekart_router, ekart_webhook_router,
 ):
-    app.include_router(router)
+    app.include_router(_router)
 
 
 @app.get("/", tags=["Health"])

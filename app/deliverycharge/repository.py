@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import re
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy import asc, desc, text
@@ -6,11 +7,18 @@ from app.shared.filters import apply_filters, apply_ordering, apply_pagination, 
 
 from .models import DeliveryCharge
 
+
+def _parse_min_order_value(order_value_range: Optional[str]) -> Optional[float]:
+    if not order_value_range:
+        return None
+    match = re.search(r"(\d+(?:\.\d+)?)", str(order_value_range).replace(",", ""))
+    return float(match.group(1)) if match else None
+
 def _get_shipping_type(db: Session, shipping_type_id):
     if not shipping_type_id:
         return None
     row = db.execute(
-        text('SELECT "ShippingTypeId", "ShippingType" FROM mdm."ShippingType" WHERE "ShippingTypeId" = :id LIMIT 1'),
+        text('SELECT "ShippingTypeId", "ShippingTypeName" FROM mdm."ShippingType" WHERE "ShippingTypeId" = :id LIMIT 1'),
         {"id": shipping_type_id}
     ).fetchone()
     if row:
@@ -19,11 +27,15 @@ def _get_shipping_type(db: Session, shipping_type_id):
 
 
 def _to_response(db: Session, entity: DeliveryCharge) -> dict:
+    min_order_value = _parse_min_order_value(entity.orderValueRange)
     return {
         "deliveryChargeId": entity.deliveryChargeId,
         "shippingTypeId": entity.shippingTypeId,
-        "deliveryCharges": float(entity.deliveryCharges) if entity.deliveryCharges else None,
+        "deliveryCharges": float(entity.deliveryCharges) if entity.deliveryCharges is not None else None,
         "orderValueRange": entity.orderValueRange,
+        "minOrderValue": min_order_value,
+        "isEligible": True,
+        "unlockAmount": 0.0,
         "state": entity.state,
         "isActive": entity.isActive,
         "days": entity.days,

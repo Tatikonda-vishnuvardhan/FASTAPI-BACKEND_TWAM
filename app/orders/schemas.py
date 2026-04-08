@@ -28,6 +28,42 @@ class OrderResponse(BaseModel):
     isEmailDuplicate: Optional[bool] = None
 
 
+class CheckoutSummaryRequest(BaseModel):
+    cartIds: List[int]
+    shippingAddressId: Optional[int] = None
+    billingAddressId: Optional[int] = None
+    shippingTypeId: Optional[int] = None
+    couponAmount: Optional[float] = 0
+
+
+class CheckoutSummaryItem(BaseModel):
+    cartId: int
+    productId: Optional[int] = None
+    productVariantId: Optional[int] = None
+    productVariantDetailId: Optional[int] = None
+    productName: Optional[str] = None
+    productImage: Optional[str] = None
+    quantity: int
+    unitPrice: Optional[float] = None
+    taxAmount: Optional[float] = None
+    lineTotal: Optional[float] = None
+
+
+class CheckoutSummaryResponse(BaseModel):
+    shippingAddress: Optional["AddressResponse"] = None
+    billingAddress: Optional["AddressResponse"] = None
+    deliveryInfo: Optional["DeliveryInfoResponse"] = None
+    shippingTypeId: Optional[int] = None
+    cartItems: List[CheckoutSummaryItem]
+    itemCount: int
+    totalQuantity: int
+    subTotal: float
+    taxAmount: float
+    deliveryCharge: float
+    couponAmount: float
+    totalAmount: float
+
+
 # ── Create Order ─────────────────────────────────────────────────────────────
 
 class CreateOrderRequest(BaseModel):
@@ -45,6 +81,9 @@ class CreateOrderRequest(BaseModel):
     cartId: Optional[List[int]] = None
     orderItems: Optional[List[OrderItemInput]] = None
     isWhatsappNotification: Optional[bool] = None
+    paymentMethod: Optional[str] = None
+    paymentAccount: Optional[str] = None
+    platform: Optional[str] = None
 
 
 # ── ReOrder (Cart) ────────────────────────────────────────────────────────────
@@ -152,6 +191,10 @@ class DeliveryInfoResponse(BaseModel):
     days: Optional[str] = None
     isFree: Optional[bool] = None
     description: Optional[str] = None
+    orderValueRange: Optional[str] = None
+    minOrderValue: Optional[float] = None
+    isEligible: Optional[bool] = None
+    unlockAmount: Optional[float] = None
 
     class Config:
         from_attributes = True
