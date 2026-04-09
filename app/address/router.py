@@ -29,7 +29,7 @@ def parse_filters(raw: Optional[str]) -> Optional[list]:
         raise HTTPException(status_code=400, detail="Invalid Filters format.")
 
 
-@router.get("/", response_model=schemas.AddressListResponse)
+@router.get("", response_model=schemas.AddressListResponse)
 def get_addresses(
     Filters:         Optional[str]  = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -71,7 +71,7 @@ def get_address(
     return result
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 def create_address(
     command: schemas.AddressCreate,
     db: Session = Depends(get_db),

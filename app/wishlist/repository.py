@@ -92,7 +92,7 @@ def get_all(db, filters, order_ascending, order_property, page_index, page_size)
                )
         LEFT JOIN twam."Products" p
                ON p."ProductId" = w."ProductId"
-        LEFT JOIN mdm."brands" b
+        LEFT JOIN mdm."Brand" b
                ON b."brandId" = p."BrandId"
         LEFT JOIN (
             SELECT
@@ -397,7 +397,7 @@ def get_user_wishlist(db: Session, user_id: str):
                ON pvd."ProductVariantDetailId" = w."ProductVariantDetailId"
         LEFT JOIN mdm."Size" sz
                ON sz."SizeId" = pvd."Size"
-        LEFT JOIN mdm."brands" b
+        LEFT JOIN mdm."Brand" b
                ON b."brandId" = p."BrandId"
         LEFT JOIN (
             SELECT

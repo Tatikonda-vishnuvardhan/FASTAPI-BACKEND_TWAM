@@ -9,7 +9,7 @@ from app.auth.dependencies import get_current_user, require_roles, Roles, Curren
 router = APIRouter(
     dependencies=[Depends(get_current_user)],prefix="/api/MenuRoleClaim", tags=["MenuRoleClaim"])
 
-@router.get("/", response_model=schemas.MenuRoleClaimListResponse)
+@router.get("", response_model=schemas.MenuRoleClaimListResponse)
 def get_list(
     Filters: Optional[str] = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -27,7 +27,7 @@ def get_detail(claim_id: int, db: Session = Depends(get_db)):
     if not result: raise HTTPException(404, "MenuRoleClaim not found.")
     return result
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 def create(command: schemas.MenuRoleClaimCreate, db: Session = Depends(get_db)):
     return {"menuRoleClaimId": repository.create(db, command)}
 

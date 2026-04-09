@@ -20,7 +20,7 @@ def parse_filters(raw: Optional[str]) -> Optional[list]:
         raise HTTPException(status_code=400, detail="Invalid Filters format.")
 
 
-@router.get("/", response_model=schemas.StateListResponse)
+@router.get("", response_model=schemas.StateListResponse)
 def get_list(
     Filters: Optional[str] = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -40,7 +40,7 @@ def get_detail(state_id: int, db: Session = Depends(get_db)):
     return result
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 def create(command: schemas.StateCreate, db: Session = Depends(get_db)):
     return {"stateId": repository.create(db, command)}
 

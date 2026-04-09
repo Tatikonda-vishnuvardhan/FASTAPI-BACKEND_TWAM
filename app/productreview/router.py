@@ -48,7 +48,7 @@ def _save_photo(file: UploadFile) -> str:
 # GET endpoints (unchanged)
 # ---------------------------------------------------------------------------
 
-@router.get("/", response_model=schemas.ProductReviewListResponse)
+@router.get("", response_model=schemas.ProductReviewListResponse)
 def get_reviews(
     Filters:         Optional[str]  = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -75,7 +75,7 @@ def get_review(review_id: int, db: Session = Depends(get_db)):
 # All review fields are sent as Form fields; photo is an optional UploadFile.
 # ---------------------------------------------------------------------------
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 def create_review(
     productId:        Optional[int]  = Form(None),
     productVariantId: Optional[int]  = Form(None),

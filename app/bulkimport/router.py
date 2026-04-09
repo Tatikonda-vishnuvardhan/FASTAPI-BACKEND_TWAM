@@ -27,6 +27,7 @@ except ImportError:
 
 from database import get_db
 from app.auth.dependencies import get_current_user, require_roles, Roles, CurrentUser
+from app.brand.models import Brand
 
 router = APIRouter(
     prefix="/api/BulkImport",
@@ -68,7 +69,7 @@ ENTITY_CONFIG = {
             ("brandName",        "Brand Name*",       "str",  True),
             ("brandDescription", "Description",       "str",  False),
         ],
-        "table":  'mdm."brands"',
+        "table":  'mdm."Brand"',
         "schema": "mdm",
         "required": ["brandName"],
         "notes": "Brand images must be uploaded separately via the Brands page",
@@ -431,14 +432,18 @@ def _insert_row(db: Session, entity: str, row: dict, user_id: str, now: datetime
         """), {**row, "userId": user_id, "now": now})
 
     elif entity == "brands":
-        db.execute(text("""
-            INSERT INTO mdm."brands"
-              ("brandName","brandDescription","userProfileId","state",
-               "isActive","createdDate","modifiedDate","deletedInd")
-            VALUES
-              (:brandName,:brandDescription,:userId,'Active',
-               true,:now,:now,false)
-        """), {**row, "userId": user_id, "now": now})
+        db.add(Brand(
+            brandName=row["brandName"],
+            brandDescription=row.get("brandDescription"),
+            userProfileId=user_id,
+            state="Active",
+            isActive=True,
+            createdBy=user_id,
+            modifiedBy=user_id,
+            createdDate=now,
+            modifiedDate=now,
+            deletedInd=False,
+        ))
 
     elif entity == "sizes":
         db.execute(text("""

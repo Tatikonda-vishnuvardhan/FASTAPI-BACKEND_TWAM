@@ -15,7 +15,7 @@ def get_menu(command: schemas.MenuGetRequest, db: Session = Depends(get_db)):
     return repository.get_menu_for_role(db, command.roleId)
 
 # Admin paged grid
-@router.get("/", response_model=schemas.MenuPageListResponse)
+@router.get("", response_model=schemas.MenuPageListResponse)
 def get_grid(
     Filters: Optional[str] = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -33,7 +33,7 @@ def get_detail(menu_id: int, db: Session = Depends(get_db)):
     if not result: raise HTTPException(404, "Menu not found.")
     return result
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 def create(command: schemas.MenuCreate, db: Session = Depends(get_db)):
     return {"menuId": repository.create(db, command)}
 

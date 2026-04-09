@@ -16,7 +16,7 @@ router = APIRouter(
 )
 
 
-@router.get("/", response_model=OrderItemGrid, summary="Get paginated OrderItems grid")
+@router.get("", response_model=OrderItemGrid, summary="Get paginated OrderItems grid")
 def grid(
     pageNumber:  Optional[int] = Query(1,    ge=1),
     pageSize:    Optional[int] = Query(10,   ge=1, le=200),
@@ -46,7 +46,7 @@ def get_order_item(order_item_id: int, db: Session = Depends(get_db)):
     return item
 
 
-@router.post("/", response_model=OrderItemResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=OrderItemResponse, status_code=status.HTTP_201_CREATED)
 def create_order_item(payload: OrderItemCreate, db: Session = Depends(get_db)):
     return repository.create_order_item(db=db, payload=payload)
 

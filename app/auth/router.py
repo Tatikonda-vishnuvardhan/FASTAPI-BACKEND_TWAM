@@ -27,7 +27,7 @@ from .schemas import (
 from .repository import (
     authenticate_user, build_token_claims,
     create_identity_user, change_password,
-    _get_identity_user_by_username, IDENTITY_USER_TABLE,
+    _get_identity_user_by_username,
     reset_password_with_token,
 )
 from .security import create_access_token, decode_token, decode_reset_token, EXPIRES_MINUTES
@@ -121,19 +121,14 @@ async def update_profile(
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    db.execute(
-        text(f"""
-            UPDATE {IDENTITY_USER_TABLE}
-            SET "FirstName"   = :first,
-                "MiddleName"  = :middle,
-                "LastName"    = :last,
-                "PhoneNumber" = :phone
-            WHERE "Id" = :uid
-        """),
-        {"first": request.FirstName or "", "middle": request.MiddleName or "",
-         "last": request.LastName or "", "phone": request.PhoneNumber or "",
-         "uid": user["id"]},
-    )
+    # Update IdentityUser via ORM
+    user.FirstName = request.FirstName or ""
+    user.MiddleName = request.MiddleName or ""
+    user.LastName = request.LastName or ""
+    user.PhoneNumber = request.PhoneNumber or ""
+    user.ModifiedDate = datetime.now(timezone.utc)
+    user.ModifiedBy = current_user.sub
+
     db.execute(
         text("""
             UPDATE twam."People"
@@ -146,7 +141,7 @@ async def update_profile(
         """),
         {"first": request.FirstName or "", "middle": request.MiddleName or "",
          "last": request.LastName or "", "phone": request.PhoneNumber or "",
-         "uid": user["id"]},
+         "uid": user.Id},
     )
     db.commit()
     return {"message": "User updated successfully."}
@@ -169,24 +164,20 @@ async def update_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    db.execute(
-        text(f"""
-            UPDATE {IDENTITY_USER_TABLE}
-            SET "IsActive"          = :active,
-                "UserRoleId"        = :role,
-                "AccessFailedCount" = 0,
-                "LockoutEnd"        = NULL
-            WHERE "Id" = :uid
-        """),
-        {"active": request.IsActive, "role": request.RoleId, "uid": user["id"]},
-    )
+    # Update IdentityUser via ORM
+    user.IsActive = request.IsActive
+    user.UserRoleId = request.RoleId
+    user.AccessFailedCount = 0
+    user.LockoutEnd = None
+    user.ModifiedDate = datetime.now(timezone.utc)
+
     db.execute(
         text("""
             UPDATE twam."People"
             SET "IsActive" = :active, "RoleId" = :role, "ModifiedDate" = NOW()
             WHERE "UserProfileId" = :uid
         """),
-        {"active": request.IsActive, "role": request.RoleId, "uid": user["id"]},
+        {"active": request.IsActive, "role": request.RoleId, "uid": user.Id},
     )
     db.commit()
     return True
@@ -225,9 +216,9 @@ async def send_reset_password(request: ResetPasswordRequest, db: Session = Depen
 
     reset_token = create_access_token(
         user_claims={
-            "sub":     user["email"],
+            "sub":     user.Email,
             "purpose": "password_reset",
-            "email":   user["email"],
+            "email":   user.Email,
         },
         expires_minutes=15,
     )
@@ -237,10 +228,10 @@ async def send_reset_password(request: ResetPasswordRequest, db: Session = Depen
         from app.sendemail.repository import send_email
         from app.sendemail.schemas import EmailCreate
 
-        full_name = f"{user['first_name']} {user['last_name']}".strip() or user["email"]
+        full_name = user.full_name or user.Email
         sent = send_email(db, EmailCreate(
             name    = full_name,
-            email   = user["email"],
+            email   = user.Email,
             subject = request.Subject or "Reset Your Password — Only TWAM",
             message = (
                 f"Hello {full_name},\n\n"

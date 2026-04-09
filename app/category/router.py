@@ -85,7 +85,7 @@ def get_product_detail_categories(
 # ADMIN endpoints — role required
 # ─────────────────────────────────────────────────────────────────────────────
 
-@router.get("/", response_model=schemas.CategoryListResponse,
+@router.get("", response_model=schemas.CategoryListResponse,
             dependencies=[Depends(require_roles(Roles.SUPER_ADMIN, Roles.PRODUCT_MANAGER, Roles.INVENTORY_MANAGER))])
 def get_categories(
     request: Request,
@@ -114,7 +114,7 @@ def get_categories(
     return repository.get_all_categories(db, raw_filters, o_asc, o_prop, p_index, p_size, only_child)
 
 
-@router.post("/", status_code=201,
+@router.post("", status_code=201,
              dependencies=[Depends(require_roles(Roles.SUPER_ADMIN, Roles.PRODUCT_MANAGER))])
 def create_category(command: schemas.CategoryCreate, db: Session = Depends(get_db)):
     return {"categoryId": repository.create_category(db, command)}

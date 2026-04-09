@@ -21,7 +21,7 @@ def parse_filters(raw: Optional[str]) -> Optional[list]:
 
 
 # ── GET /api/Cart ─────────────────────────────────────────────────────────────
-@router.get("/", response_model=schemas.CartListResponse)
+@router.get("", response_model=schemas.CartListResponse)
 def get_cart_list(
     Filters: Optional[str] = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -49,7 +49,7 @@ def get_cart_list(
 
 
 # ── POST /api/Cart — IMPROVED ─────────────────────────────────────────────────
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 def create_cart(
     cart: schemas.CartCreate,
     db: Session = Depends(get_db),

@@ -25,7 +25,7 @@ def parse_filters(raw: Optional[str]) -> Optional[list]:
 
 
 # ── PUBLIC: list products (guests + logged-in users) ─────────────────────────
-@router.get("/", response_model=schemas.ProductListResponse)
+@router.get("", response_model=schemas.ProductListResponse)
 def get_products(
     Filters:         Optional[str]  = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -54,7 +54,7 @@ def get_product(product_id: int, db: Session = Depends(get_db)):
 
 
 # ── PROTECTED: create product (staff only) ────────────────────────────────────
-@router.post("/", status_code=201,
+@router.post("", status_code=201,
              dependencies=[Depends(require_roles(Roles.SUPER_ADMIN, Roles.PRODUCT_MANAGER))])
 def create_product(command: schemas.ProductCreate, db: Session = Depends(get_db)):
     new_id = repository.create_product(db, command)

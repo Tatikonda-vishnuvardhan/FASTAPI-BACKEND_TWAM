@@ -17,7 +17,7 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # ---------------- GET /api/Blog ----------------
-@router.get("/", response_model=schemas.BlogListResponse)
+@router.get("", response_model=schemas.BlogListResponse)
 def get_all_blogs(db: Session = Depends(get_db)):
 
     blogs = repository.get_all_blogs(db)
@@ -34,7 +34,7 @@ def get_all_blogs(db: Session = Depends(get_db)):
 
 
 # ---------------- POST /api/Blog ----------------
-@router.post("/", response_model=schemas.BlogWrappedResponse)
+@router.post("", response_model=schemas.BlogWrappedResponse)
 def create_blog(
     blogTitle: str = Form(...),
     blogContent: str = Form(...),

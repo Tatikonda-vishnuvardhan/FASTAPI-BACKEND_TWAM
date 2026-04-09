@@ -3,7 +3,7 @@ from sqlalchemy import asc, desc
 from .models import UserRole
 
 def get_all(db: Session, filters, order_ascending, order_property, page_index, page_size) -> dict:
-    query = db.query(UserRole).filter(UserRole.deletedInd == False)
+    query = db.query(UserRole).filter(UserRole.DeletedInd == False)
     if filters:
         for f in filters:
             prop = f.get("property"); val = f.get("value")
@@ -17,4 +17,4 @@ def get_all(db: Session, filters, order_ascending, order_property, page_index, p
     total = query.count()
     if page_index and page_size:
         query = query.offset((page_index - 1) * page_size).limit(page_size)
-    return {"count": total, "list": [{"userRoleId": r.userRoleId, "roleName": r.roleName, "isActive": r.isActive} for r in query.all()], "parameters": None}
+    return {"count": total, "list": [{"userRoleId": r.UserRoleId, "roleName": r.RoleName, "isActive": r.IsActive} for r in query.all()], "parameters": None}

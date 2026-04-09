@@ -9,7 +9,7 @@ from app.auth.dependencies import get_current_user, require_roles, Roles, Curren
 router = APIRouter(
     dependencies=[Depends(get_current_user)],prefix="/api/SupportRequest", tags=["SupportRequest"])
 
-@router.get("/", response_model=schemas.SupportRequestListResponse)
+@router.get("", response_model=schemas.SupportRequestListResponse)
 def get_list(Filters: Optional[str]=Query(None,alias="Filters"), Order_Ascending: Optional[bool]=Query(None,alias="Order.Ascending"),
     Order_Property: Optional[str]=Query(None,alias="Order.Property"), Page_Index: Optional[int]=Query(None,alias="Page.Index",ge=1),
     Page_Size: Optional[int]=Query(None,alias="Page.Size",ge=1), db: Session=Depends(get_db)):
@@ -21,7 +21,7 @@ def get_detail(supportId: int, db: Session=Depends(get_db)):
     if not result: raise HTTPException(404, "SupportRequest not found.")
     return result
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 def create(command: schemas.SupportRequestCreate, db: Session=Depends(get_db)):
     return {"supportId": repository.create(db, command)}
 

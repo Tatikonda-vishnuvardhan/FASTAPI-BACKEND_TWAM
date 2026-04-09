@@ -37,7 +37,7 @@ from database import get_db
 from app.auth.repository import (
     authenticate_user, build_token_claims,
     create_identity_user, change_password,
-    _get_identity_user_by_username, IDENTITY_USER_TABLE,
+    _get_identity_user_by_username,
     reset_password_with_token,
 )
 from app.auth.security import create_access_token, EXPIRES_MINUTES, decode_token, decode_reset_token
@@ -300,15 +300,15 @@ async def register_reset_password(request: ResetPasswordRequest, db: Session = D
         return generic_response
 
     reset_token = create_access_token(
-        user_claims={"sub": user["email"], "purpose": "password_reset", "email": user["email"]},
+        user_claims={"sub": user.Email, "purpose": "password_reset", "email": user.Email},
         expires_minutes=15,
     )
     reset_link = f"{FRONTEND_URL}/reset-password?token={reset_token}"
 
-    full_name = f"{user['first_name']} {user['last_name']}".strip() or user["email"]
+    full_name = f"{user.FirstName} {user.LastName}".strip() or user.Email
     sent = send_email(db, EmailCreate(
         name    = full_name,
-        email   = user["email"],
+        email   = user.Email,
         subject = "Reset Your Password — Only TWAM",
         message = (
             f"Hello {full_name},\n\n"
@@ -345,12 +345,12 @@ async def send_forgot_password_otp(request: OtpRequest, db: Session = Depends(ge
         "attempts":   0,
     }
 
-    full_name  = f"{user['first_name']} {user['last_name']}".strip() or user["email"]
+    full_name  = f"{user.FirstName} {user.LastName}".strip() or user.Email
     html_body  = _otp_email_html(full_name, otp)
 
     sent = send_email(db, EmailCreate(
         name    = full_name,
-        email   = user["email"],
+        email   = user.Email,
         subject = f"Your TWAM Password Reset OTP — {otp}",
         message = html_body,
         filename=None, isFile=False, data=None,
@@ -409,8 +409,8 @@ async def verify_forgot_password_otp(request: OtpVerifyRequest, db: Session = De
 
     reset_token = create_access_token(
         user_claims={
-            "sub":     user["email"],
-            "email":   user["email"],
+            "sub":     user.Email,
+            "email":   user.Email,
             "purpose": "password_reset",
         },
         expires_minutes=15,
@@ -419,7 +419,7 @@ async def verify_forgot_password_otp(request: OtpVerifyRequest, db: Session = De
     return {
         "message": "OTP verified successfully.",
         "token":   reset_token,
-        "email":   user["email"],
+        "email":   user.Email,
     }
 
 
@@ -469,27 +469,22 @@ async def register_update(
         raise HTTPException(status_code=404, detail="User not found.")
 
     no_change = (
-        (request.FirstName   or "") == (user["first_name"]   or "") and
-        (request.MiddleName  or "") == (user["middle_name"]  or "") and
-        (request.LastName    or "") == (user["last_name"]    or "") and
-        (request.PhoneNumber or "") == (user["phone_number"] or "")
+        (request.FirstName   or "") == (user.FirstName   or "") and
+        (request.MiddleName  or "") == (user.MiddleName  or "") and
+        (request.LastName    or "") == (user.LastName    or "") and
+        (request.PhoneNumber or "") == (user.PhoneNumber or "")
     )
     if no_change:
         raise HTTPException(status_code=400, detail="No changes detected. Profile is already up to date.")
 
-    db.execute(
-        text(f"""
-            UPDATE {IDENTITY_USER_TABLE}
-            SET "FirstName"   = :first,
-                "MiddleName"  = :middle,
-                "LastName"    = :last,
-                "PhoneNumber" = :phone
-            WHERE "Id" = :uid
-        """),
-        {"first": request.FirstName or "", "middle": request.MiddleName or "",
-         "last": request.LastName or "", "phone": request.PhoneNumber or "",
-         "uid": user["id"]},
-    )
+    # Update IdentityUser via ORM
+    user.FirstName   = request.FirstName   or ""
+    user.MiddleName  = request.MiddleName  or ""
+    user.LastName    = request.LastName    or ""
+    user.PhoneNumber = request.PhoneNumber or ""
+    db.flush()
+
+    # Update People table (no ORM model for this table yet)
     db.execute(
         text("""
             UPDATE twam."People"
@@ -499,7 +494,7 @@ async def register_update(
         """),
         {"first": request.FirstName or "", "middle": request.MiddleName or "",
          "last": request.LastName or "", "phone": request.PhoneNumber or "",
-         "uid": user["id"]},
+         "uid": user.Id},
     )
     db.commit()
     return {"message": "User updated successfully."}

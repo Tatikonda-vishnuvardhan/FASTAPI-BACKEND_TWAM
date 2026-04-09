@@ -4,7 +4,7 @@ from database import Base
 
 
 class Blog(Base):
-    __tablename__ = "blogs"
+    __tablename__ = "Blog"
     __table_args__ = {"schema": "twam"}
 
     blogId = Column(Integer, primary_key=True, index=True)

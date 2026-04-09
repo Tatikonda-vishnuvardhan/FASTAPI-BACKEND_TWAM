@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/Email", tags=["Email"])
 # SEND EMAIL — any logged-in user
 # ─────────────────────────────────────────────────────────────────────────────
 
-@router.post("/", status_code=status.HTTP_200_OK,
+@router.post("", status_code=status.HTTP_200_OK,
             #  dependencies=[Depends(get_current_user)]
             )
 def send_email(payload: EmailCreate, db: Session = Depends(get_db)):

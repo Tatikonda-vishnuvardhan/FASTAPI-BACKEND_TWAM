@@ -1,21 +1,29 @@
 from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import asc, desc, text
+from sqlalchemy import asc, desc
 from .models import MenuRoleClaim
+from app.menu.models import Menu
+from app.userrole.models import UserRole
 
 def _enrich(db: Session, r: MenuRoleClaim) -> dict:
     menu_name = None
     role_name = None
     try:
-        row = db.execute(text('SELECT "Name" FROM twam."Menu" WHERE "MenuId" = :mid AND "DeletedInd"=false'),
-                         {"mid": r.menuId}).fetchone()
-        if row: menu_name = row[0]
+        menu = db.query(Menu).filter(
+            Menu.menuId == r.menuId,
+            Menu.deletedInd == False
+        ).first()
+        if menu:
+            menu_name = menu.name
     except Exception: pass
     try:
-        row = db.execute(text('SELECT "RoleName" FROM twam."UserRole" WHERE "UserRoleId" = :rid'),
-                         {"rid": r.roleId}).fetchone()
-        if row: role_name = row[0]
+        role = db.query(UserRole).filter(
+            UserRole.UserRoleId == r.roleId,
+            UserRole.DeletedInd == False
+        ).first()
+        if role:
+            role_name = role.RoleName
     except Exception: pass
     return {"menuRoleClaimId": r.menuRoleClaimId, "menuId": r.menuId, "roleId": r.roleId,
             "isActive": r.isActive, "state": r.state, "menuName": menu_name,

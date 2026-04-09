@@ -10,7 +10,7 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],prefix="/api/Country", tags=["Country"])
 
 
-@router.get("/", response_model=schemas.CountryListResponse)
+@router.get("", response_model=schemas.CountryListResponse)
 def get_countries(
     Filters: Optional[str] = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -67,7 +67,7 @@ def get_country(country_id: int, db: Session = Depends(get_db)):
     return country
 
 
-@router.post("/", response_model=schemas.CountryResponse, status_code=201)
+@router.post("", response_model=schemas.CountryResponse, status_code=201)
 def create_country(country: schemas.CountryCreate, db: Session = Depends(get_db)):
     return repository.create_country(db, country.model_dump())
 

@@ -9,7 +9,7 @@ from app.auth.dependencies import get_current_user, require_roles, Roles, Curren
 router = APIRouter(
     dependencies=[Depends(get_current_user)],prefix="/api/UserRole", tags=["UserRole"])
 
-@router.get("/", response_model=schemas.UserRoleListResponse)
+@router.get("", response_model=schemas.UserRoleListResponse)
 def get_list(
     Filters: Optional[str] = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),

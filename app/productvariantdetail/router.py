@@ -118,7 +118,7 @@ def get_user_product_detail(pvd_id: int, db: Session = Depends(get_db)):
 # ADMIN endpoints — require login — defined AFTER all specific public routes
 # ─────────────────────────────────────────────────────────────────────────────
 
-@router.get("/", response_model=schemas.ProductVariantDetailListResponse,
+@router.get("", response_model=schemas.ProductVariantDetailListResponse,
             dependencies=[Depends(get_current_user)])
 def get_variant_details(
     Filters: Optional[str] = Query(None, alias="Filters"),
@@ -133,7 +133,7 @@ def get_variant_details(
     )
 
 
-@router.post("/", status_code=201, dependencies=[Depends(get_current_user)])
+@router.post("", status_code=201, dependencies=[Depends(get_current_user)])
 def create_variant_detail(command: schemas.ProductVariantDetailCreate, db: Session = Depends(get_db)):
     return {"productVariantDetailId": repository.create_variant_detail(db, command)}
 

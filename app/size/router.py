@@ -11,7 +11,7 @@ from app.auth.dependencies import get_current_user, require_roles, Roles, Curren
 router = APIRouter(prefix="/api/Size", tags=["Size"])
 
 
-@router.get("/", response_model=schemas.SizeListResponse)
+@router.get("", response_model=schemas.SizeListResponse)
 def get_sizes(
     Filters: Optional[str] = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -68,7 +68,7 @@ def get_size(size_id: int, db: Session = Depends(get_db)):
     return size
 
 
-@router.post("/", response_model=schemas.SizeResponse, status_code=201,
+@router.post("", response_model=schemas.SizeResponse, status_code=201,
              dependencies=[Depends(get_current_user)])
 def create_size(size: schemas.SizeCreate, db: Session = Depends(get_db)):
     return repository.create_size(db, size.model_dump())

@@ -13,6 +13,9 @@ from .models import (
     OrderReturnInfo, OrderRefund
 )
 from app.orderitems.models import OrderItems
+from app.people.models import People
+from app.auth.models import IdentityUser
+from app.shared.app_settings import get_setting
 
 BASE_URL = os.getenv("BASE_URL", "")
 
@@ -315,17 +318,36 @@ def get_checkout_summary(db: Session, user_profile_id: str, data) -> dict:
 # ── Check Out of Stock ────────────────────────────────────────────────────────
 
 def check_out_of_stock(db: Session, product_variant_detail_ids: List[int]) -> List[dict]:
+    """
+    Check which product variant details are out of stock.
+    Uses direct SQL against ProductVariantDetail.IsOutOfStock instead of the
+    missing stored procedure twam.SP_CheckProductStock.
+    IMPORTANT: rolls back on any DB error so the transaction stays usable.
+    """
     if not product_variant_detail_ids:
         return []
     ids_str = ",".join(str(i) for i in product_variant_detail_ids)
     try:
         rows = db.execute(
-            text("CALL twam.SP_CheckProductStock(:ids)"),
-            {"ids": ids_str}
+            text(f"""
+                SELECT pvd."ProductVariantDetailId", p."Name"
+                FROM twam."ProductVariantDetail" pvd
+                LEFT JOIN twam."ProductVariants" pv  ON pv."ProductVariantId"  = pvd."ProductVariantId"
+                LEFT JOIN twam."Products"         p   ON p."ProductId"          = pv."ProductId"
+                WHERE pvd."ProductVariantDetailId" IN ({ids_str})
+                  AND pvd."DeletedInd" = false
+                  AND (pvd."IsOutOfStock" = true OR COALESCE(pvd."AvailableQuantity", 1) <= 0)
+            """)
         ).fetchall()
         return [{"productVariantDetailId": r[0], "productName": r[1]} for r in rows]
-    except Exception:
-        return []
+    except Exception as e:
+        print(f"[Order] check_out_of_stock query failed: {e}")
+        # Roll back so the transaction is usable for subsequent queries
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return []  # Treat as in-stock and let order proceed
 
 
 # ── Create Order ──────────────────────────────────────────────────────────────
@@ -446,10 +468,75 @@ def create_order(db: Session, data) -> dict:
         status="Pending",
         createdDate=datetime.now(timezone.utc)
     ))
-    
+
+    # ── FIX: do NOT commit yet — PayG must succeed before the order is saved.
+    # We only flush here to get orderId from the DB sequence; the full commit
+    # happens inside the PayG success path below.  If PayG fails we rollback
+    # so the order never appears in the database and the user gets a real error.
+    db.flush()
+
+    # ── PayG payment initiation ──────────────────────────────────────────────
+    # NOTE: Order placed notification fires ONLY after payment confirmation
+    # in app/payment/router.py -> _send_payment_notification(), not here.
+    # Firing here would send confirmation BEFORE payment is approved.
+    from app.payment.payg_client import create_payg_order
+
+    # Fetch customer info while still inside the open transaction
+    _user = (
+        db.query(
+            IdentityUser.Email,
+            People.firstName,
+            People.lastName,
+            IdentityUser.PhoneNumber,
+        )
+        .join(People, IdentityUser.Id == People.userProfileId)
+        .filter(
+            People.userProfileId == getattr(data, "userProfileId", None),
+            People.deletedInd == False,
+        )
+        .first()
+    )
+
+    _addr = _get_address(db, getattr(data, "shippingAddressId", None))
+
+    try:
+        _payg = create_payg_order(
+            order_id       = order_id,
+            order_number   = order.orderNumber,
+            amount         = float(getattr(data, "totalAmount", 0) or 0),
+            customer_name  = (
+                ((_user[1] or "") + " " + (_user[2] or "")).strip()
+                if _user else "Customer"
+            ),
+            customer_email = _user[0] if _user else "",
+            customer_phone = (
+                (_addr or {}).get("phone") or (_user[3] if _user else "")
+            ),
+            billing_address = (_addr or {}).get("addressLine", ""),
+            billing_city    = (_addr or {}).get("city", ""),
+            billing_state   = "",
+            billing_zip     = (_addr or {}).get("pinCode", ""),
+            redirect_url    = get_setting(
+                "payg_redirect_url",
+                "http://localhost:8000/api/Payment/Callback",
+            ),
+        )
+    except Exception as _exc:
+        # ── PayG failed: roll back everything so no orphan order is saved ──
+        import traceback
+        print(f"[Payment] ❌ PayG initiation FAILED — rolling back order {order_id}:")
+        print(traceback.format_exc())
+        db.rollback()
+        raise RuntimeError(str(_exc)) from _exc
+
+    # ── PayG succeeded: commit order + set payment ref ───────────────────────
+    payment_url = _payg.get("ProcessingUrl") or _payg.get("PaymentProcessUrl")
+    order.paymentTransactionRefNo = _payg.get("_unique_request_id", "")
+    order.orderKeyId              = _payg.get("OrderKeyId", "")   # FIX: store for Detail API lookup
+    db.add(order)
     db.commit()
 
-    # Mark cart items as ordered
+    # Mark cart items as ordered (separate commit after the order is persisted)
     cart_ids = getattr(data, "cartId", None) or []
     user_profile_id = getattr(data, "userProfileId", None) or ""
     if cart_ids:
@@ -459,15 +546,7 @@ def create_order(db: Session, data) -> dict:
         ))
         db.commit()
 
-    # Send order confirmation notification (email + SMS)
-    try:
-        from app.ekart.notifications import send_order_placed_notification
-        send_order_placed_notification(db, order_id)
-    except Exception as e:
-        print(f"[Order] Notification failed for order {order_id}: {e}")
-
-    # TODO: Integrate IPaymentService.CreateOrderRequestAsync
-    return {"orderId": order_id, "paymentProcessUrl": None}
+    return {"orderId": order_id, "paymentProcessUrl": payment_url}
 
 
 # ── ReOrder (Cart) ────────────────────────────────────────────────────────────
@@ -578,10 +657,52 @@ def create_guest_order(db: Session, data) -> dict:
             ))
         order.taxAmount = total_tax
 
+    # ── FIX: flush only — do NOT commit until PayG confirms ─────────────────
+    db.flush()
+
+    # ── PayG payment initiation (guest order) ────────────────────────────────
+    from app.payment.payg_client import create_payg_order
+    from app.shared.app_settings import get_setting
+
+    _addr_line = getattr(data, "addressLine", "") or ""
+    _city      = getattr(data, "city", "") or ""
+    _zip       = getattr(data, "pinCode", "") or ""
+    _phone     = getattr(data, "phone", "") or ""
+    _email     = getattr(data, "email", "") or ""
+    _name      = f"{getattr(data, 'firstName', '') or ''} {getattr(data, 'lastName', '') or ''}".strip()
+
+    try:
+        _payg = create_payg_order(
+            order_id        = order_id,
+            order_number    = order.orderNumber,
+            amount          = float(getattr(data, "totalAmount", 0) or 0),
+            customer_name   = _name or "Guest",
+            customer_email  = _email,
+            customer_phone  = _phone,
+            billing_address = _addr_line,
+            billing_city    = _city,
+            billing_state   = "",
+            billing_zip     = _zip,
+            redirect_url    = get_setting(
+                "payg_redirect_url",
+                "http://localhost:8000/api/Payment/Callback",
+            ),
+        )
+    except Exception as _exc:
+        import traceback
+        print(f"[Payment] ❌ PayG initiation FAILED — rolling back guest order {order_id}:")
+        print(traceback.format_exc())
+        db.rollback()
+        raise RuntimeError(str(_exc)) from _exc
+
+    # ── PayG succeeded: commit ───────────────────────────────────────────────
+    payment_url = _payg.get("ProcessingUrl") or _payg.get("PaymentProcessUrl")
+    order.paymentTransactionRefNo = _payg.get("_unique_request_id", "")
+    order.orderKeyId              = _payg.get("OrderKeyId", "")   # FIX: store for Detail API lookup
+    db.add(order)
     db.commit()
 
-    # TODO: Integrate IPaymentService.CreateOrderRequestAsync
-    return {"orderId": order_id, "paymentProcessUrl": None}
+    return {"orderId": order_id, "paymentProcessUrl": payment_url}
 
 
 # ── Cancel Order ──────────────────────────────────────────────────────────────
@@ -1024,15 +1145,7 @@ def update_order_status(
     if old_state != new_state:
         try:
             from app.ekart.notifications import send_order_status_notification
-            import asyncio
-            
-            # Run async notification in sync context
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(send_order_status_notification(db, order_id, new_state))
-            finally:
-                loop.close()
+            send_order_status_notification(db, order_id, new_state)
         except Exception as e:
             print(f"[Order] Status notification failed for order {order_id}: {e}")
     

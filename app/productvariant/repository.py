@@ -1,11 +1,16 @@
 import os
 import base64
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy import asc, desc, text
+from fastapi import HTTPException
 from app.shared.filters import apply_filters, apply_ordering, apply_pagination, build_paged_response
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 from .models import ProductVariant, ProductImage
 from app.shared.color_utils import get_matching_db_colors, is_color_query, get_color_hex, resolve_hex, _hex_to_rgb, _redmean_distance
@@ -263,7 +268,7 @@ def get_user_product_variant(db: Session, product_variant_id: int = 0, name: str
             b."brandName"
         FROM twam."ProductVariants" pv
         LEFT JOIN twam."Products" p ON p."ProductId" = pv."ProductId"
-        LEFT JOIN mdm.brands b ON b."brandId" = p."BrandId"
+        LEFT JOIN mdm."Brand" b ON b."brandId" = p."BrandId"
         WHERE (pv."DeletedInd" = false OR pv."DeletedInd" IS NULL) AND {where}
         LIMIT 1
     """
@@ -667,7 +672,7 @@ def _fallback_product_list(db, filters, page_index, page_size, order_property, o
          AND (pvd."DeletedInd" = false OR pvd."DeletedInd" IS NULL)
         LEFT JOIN mdm."Size" s         ON s."SizeId"      = pvd."Size"
         LEFT JOIN mdm."CupSize" cs     ON cs."CupSizeId"  = pvd."CupSize"
-        LEFT JOIN mdm.brands b         ON b."brandId"     = p."BrandId"
+        LEFT JOIN mdm."Brand" b         ON b."brandId"     = p."BrandId"
         LEFT JOIN twam."Category" pc   ON pc."CategoryId"  = p."CategoryId"
         LEFT JOIN twam."Category" cc   ON cc."CategoryId"  = p."ChildCategoryId"
         WHERE {where}
@@ -675,9 +680,13 @@ def _fallback_product_list(db, filters, page_index, page_size, order_property, o
     try:
         total_row = db.execute(text(count_sql), params).fetchone()
         total = int(total_row[0]) if total_row else 0
-    except Exception:
-        import traceback; traceback.print_exc()
-        total = 0
+    except Exception as e:
+        logger.error(f"Failed to get count: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to count records: {str(e)}"
+        )
 
     # ── Data ──────────────────────────────────────────────────────────────────
     # All sort-key columns are given explicit aliases so the outer ORDER BY
@@ -745,7 +754,7 @@ def _fallback_product_list(db, filters, page_index, page_size, order_property, o
              AND (pvd."DeletedInd" = false OR pvd."DeletedInd" IS NULL)
             LEFT JOIN mdm."Size" s         ON s."SizeId"     = pvd."Size"
             LEFT JOIN mdm."CupSize" cs     ON cs."CupSizeId" = pvd."CupSize"
-            LEFT JOIN mdm.brands b         ON b."brandId"    = p."BrandId"
+            LEFT JOIN mdm."Brand" b         ON b."brandId"    = p."BrandId"
             LEFT JOIN twam."Category" pc   ON pc."CategoryId"  = p."CategoryId"
             LEFT JOIN twam."Category" cc   ON cc."CategoryId"  = p."ChildCategoryId"
             WHERE {where}
@@ -756,9 +765,13 @@ def _fallback_product_list(db, filters, page_index, page_size, order_property, o
     """
     try:
         rows = db.execute(text(data_sql), params).fetchall()
-    except Exception:
-        import traceback; traceback.print_exc()
-        return {"count": 0, "list": []}
+    except Exception as e:
+        logger.error(f"Database query failed in _fallback_product_list: {str(e)}", exc_info=True)
+        db.rollback()  # Rollback transaction to prevent "aborted transaction" errors
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch product variants: {str(e)}"
+        )
 
     def _f(val):
         """Safe float ? returns None for None, actual float (incl 0.0) otherwise."""
@@ -851,16 +864,20 @@ def get_new_arrivals(
         LEFT JOIN twam."ProductVariantDetail" pvd
           ON pvd."ProductVariantId" = pv."ProductVariantId"
          AND (pvd."DeletedInd" = false OR pvd."DeletedInd" IS NULL)
-        LEFT JOIN mdm.brands b ON b."brandId" = p."BrandId"
+        LEFT JOIN mdm."Brand" b ON b."brandId" = p."BrandId"
         WHERE {where}
     """
 
     try:
         total_row = db.execute(text(count_sql), params).fetchone()
         total = int(total_row[0]) if total_row else 0
-    except Exception:
-        import traceback; traceback.print_exc()
-        total = 0
+    except Exception as e:
+        logger.error(f"Failed to get count: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to count records: {str(e)}"
+        )
 
     data_sql = f"""
         SELECT * FROM (
@@ -921,7 +938,7 @@ def get_new_arrivals(
              AND (pvd."DeletedInd" = false OR pvd."DeletedInd" IS NULL)
             LEFT JOIN mdm."Size" s     ON s."SizeId"     = pvd."Size"
             LEFT JOIN mdm."CupSize" cs ON cs."CupSizeId" = pvd."CupSize"
-            LEFT JOIN mdm.brands b     ON b."brandId"    = p."BrandId"
+            LEFT JOIN mdm."Brand" b     ON b."brandId"    = p."BrandId"
             WHERE {where}
             ORDER BY pv."ProductVariantId", pvd."ProductVariantDetailId" ASC NULLS LAST
         ) deduped
@@ -931,9 +948,13 @@ def get_new_arrivals(
 
     try:
         rows = db.execute(text(data_sql), params).fetchall()
-    except Exception:
-        import traceback; traceback.print_exc()
-        return {"count": 0, "list": []}
+    except Exception as e:
+        logger.error(f"Database query failed: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch data: {str(e)}"
+        )
 
     def _f(val):
         if val is None:

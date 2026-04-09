@@ -129,6 +129,7 @@ All protected endpoints require a Bearer JWT token.
 | 6 | Customer Support | Orders, reviews, support |
     """,
     version="2.0.0",
+    redirect_slashes=False,
     swagger_ui_parameters={"persistAuthorization": True},
     lifespan=lifespan,
 )
@@ -195,6 +196,9 @@ from app.bulkimport.router           import router as bulkimport_router
 from app.ekart.router                import router as ekart_router
 from app.ekart.webhooks              import router as ekart_webhook_router
 
+# ── PayG Payment Integration ──────────────────────────────────────────────────
+from app.payment.router              import router as payment_router
+
 # ── Register all routers ──────────────────────────────────────────────────────
 for _router in (
     auth_router, connect_router, blog_router, brand_router, category_router,
@@ -210,6 +214,7 @@ for _router in (
     userrole_router, wishlist_router, bulkimport_router,
     newsletter_router,
     ekart_router, ekart_webhook_router,
+    payment_router,
 ):
     app.include_router(_router)
 

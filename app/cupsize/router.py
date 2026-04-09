@@ -11,7 +11,7 @@ from app.auth.dependencies import get_current_user, require_roles, Roles, Curren
 router = APIRouter(prefix="/api/CupSize", tags=["CupSize"])
 
 
-@router.get("/", response_model=schemas.CupSizeListResponse)
+@router.get("", response_model=schemas.CupSizeListResponse)
 def get_cupsizes(
     Filters: Optional[str] = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -64,7 +64,7 @@ def get_cupsize(cupsize_id: int, db: Session = Depends(get_db)):
     return cupsize
 
 
-@router.post("/", response_model=schemas.CupSizeResponse, status_code=201,
+@router.post("", response_model=schemas.CupSizeResponse, status_code=201,
              dependencies=[Depends(get_current_user)])
 def create_cupsize(cupsize: schemas.CupSizeCreate, db: Session = Depends(get_db)):
     return repository.create_cupsize(db, cupsize.model_dump())

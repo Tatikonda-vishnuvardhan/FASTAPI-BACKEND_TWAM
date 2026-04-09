@@ -27,7 +27,7 @@ def parse_filters(raw: Optional[str]) -> Optional[list]:
 
 
 # ── GET /api/ProductVariants ──────────────────────────────────────────────────
-@router.get("/", response_model=schemas.ProductVariantListResponse)
+@router.get("", response_model=schemas.ProductVariantListResponse)
 def get_variants(
     Filters:         Optional[str]  = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -56,7 +56,7 @@ def get_variant(variant_id: int, db: Session = Depends(get_db)):
 
 
 # ── POST /api/ProductVariants ─────────────────────────────────────────────────
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 def create_variant(command: schemas.ProductVariantCreate, db: Session = Depends(get_db)):
     new_id = repository.create_variant(db, command)
     return {"productVariantId": new_id}

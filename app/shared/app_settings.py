@@ -17,11 +17,21 @@ Then anywhere in the app:
   cipher = get_setting("password_cipher")
 
 Keys managed here (all stored in twam."AppSettings"):
-  oauth_client_id      – OAuth2 client_id accepted by /connect/token
-  oauth_client_secret  – OAuth2 client_secret accepted by /connect/token
-  password_cipher      – TWAM server-side password hash salt
-  client_encrypt_key   – AES-CBC key Angular uses to encrypt passwords
-  ekart_webhook_secret – HMAC secret for verifying Ekart webhook calls
+  oauth_client_id       – OAuth2 client_id accepted by /connect/token
+  oauth_client_secret   – OAuth2 client_secret accepted by /connect/token
+  password_cipher       – TWAM server-side password hash salt
+  client_encrypt_key    – AES-CBC key Angular uses to encrypt passwords
+  ekart_webhook_secret  – HMAC secret for verifying Ekart webhook calls
+
+  PayG payment gateway (values seeded via SQL — not hardcoded here):
+  payg_mode             – "uat" or "live"
+  payg_mid              – PayG Merchant ID
+  payg_auth_key         – PayG AuthenticationKey
+  payg_auth_token       – PayG AuthenticationToken
+  payg_secure_hash      – PayG SecureHashKey for HMAC-SHA256
+  payg_merchant_key_id  – PayG MerchantKeyId (numeric)
+  payg_redirect_url     – Backend callback URL PayG will redirect to
+  frontend_base_url     – Frontend app base URL (for post-payment redirects)
 """
 
 from __future__ import annotations
@@ -32,9 +42,13 @@ from typing import Optional
 _cache: dict[str, str] = {}
 
 # ── Built-in defaults ──────────────────────────────────────────────────────
-# These match the values that were previously hardcoded in source files.
-# They are inserted by seed_defaults() the first time the server boots so
+# These are inserted by seed_defaults() the first time the server boots so
 # existing password hashes remain valid.
+#
+# PayG keys use empty-string defaults — real values MUST be seeded via the
+# SQL script (sql/seed_payg_settings.sql) or set through the Admin API.
+# The server will start without them but payments won't work until they exist.
+#
 # key → (default_value, description)
 _DEFAULTS: dict[str, tuple[str, str]] = {
     "oauth_client_id":      ("twam-web-portal",         "OAuth2 client_id for /connect/token"),
@@ -42,6 +56,18 @@ _DEFAULTS: dict[str, tuple[str, str]] = {
     "password_cipher":      ("TWAM@D&E*V@Tr@d@1#2$30%", "TWAM server-side password hash cipher"),
     "client_encrypt_key":   ("8080808080808080",         "AES-CBC key Angular uses to pre-encrypt passwords"),
     "ekart_webhook_secret": ("",                         "HMAC-SHA256 secret for Ekart webhook (blank = dev mode)"),
+
+    # ── PayG payment gateway ───────────────────────────────────────────────
+    # Defaults are intentionally empty — seed via sql/seed_payg_settings.sql
+    "payg_mode":            ("uat",                      "PayG gateway mode: uat or live"),
+    "payg_mid":             ("",                         "PayG Merchant ID (MID)"),
+    "payg_auth_key":        ("",                         "PayG AuthenticationKey for Basic Auth"),
+    "payg_auth_token":      ("",                         "PayG AuthenticationToken for Basic Auth"),
+    "payg_secure_hash":     ("",                         "PayG SecureHashKey for HMAC-SHA256 signing"),
+    "payg_merchant_key_id": ("",                         "PayG MerchantKeyId (numeric)"),
+    "payg_redirect_url":    ("http://localhost:8000/api/Payment/Callback",
+                                                         "Backend URL PayG redirects browser to after payment"),
+    "frontend_base_url":    ("http://localhost:5173",    "Frontend app base URL for post-payment redirects"),
 }
 
 

@@ -21,7 +21,7 @@ def parse_filters(raw: Optional[str]) -> Optional[list]:
         raise HTTPException(status_code=400, detail="Invalid Filters format.")
 
 
-@router.get("/", response_model=schemas.PeopleListResponse,
+@router.get("", response_model=schemas.PeopleListResponse,
             dependencies=[Depends(require_roles(Roles.SUPER_ADMIN))])
 def get_list(
     Filters: Optional[str] = Query(None, alias="Filters"),

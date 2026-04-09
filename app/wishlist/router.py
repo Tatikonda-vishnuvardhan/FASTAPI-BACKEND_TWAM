@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/Wishlist", tags=["Wishlist"])
 
 # ==================== PUBLIC ENDPOINTS (Guest + Logged-in) ====================
 
-@router.get("/", response_model=schemas.WishlistListResponse)
+@router.get("", response_model=schemas.WishlistListResponse)
 def get_list(
     Filters: Optional[str] = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -31,7 +31,7 @@ def get_list(
 
 
 # ── POST /api/Wishlist — IMPROVED ─────────────────────────────────────────────
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 def create(
     command: schemas.WishlistCreate,
     db: Session = Depends(get_db),

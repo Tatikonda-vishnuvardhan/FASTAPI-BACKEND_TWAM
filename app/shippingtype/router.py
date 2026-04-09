@@ -20,7 +20,7 @@ def parse_filters(raw):
         raise HTTPException(status_code=400, detail="Invalid Filters format.")
 
 
-@router.get("/", response_model=schemas.ShippingTypeListResponse)
+@router.get("", response_model=schemas.ShippingTypeListResponse)
 def get_shipping_types(
     Filters:         Optional[str]  = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -42,7 +42,7 @@ def get_shipping_type(shipping_type_id: int, db: Session = Depends(get_db)):
     return result
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 def create_shipping_type(command: schemas.ShippingTypeCreate, db: Session = Depends(get_db)):
     return {"shippingTypeId": repository.create(db, command)}
 

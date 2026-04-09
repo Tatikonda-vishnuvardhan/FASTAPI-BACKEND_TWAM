@@ -17,7 +17,7 @@ router = APIRouter(
 )
 
 
-@router.post("/", response_model=schemas.ShipmentResponse)
+@router.post("", response_model=schemas.ShipmentResponse)
 def create_shipment(command: schemas.CreateShipmentRequest, db: Session = Depends(get_db)):
     try:
         return repository.create_shipment(db, command)

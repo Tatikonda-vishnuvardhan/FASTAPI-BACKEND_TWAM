@@ -19,7 +19,7 @@ def parse_filters(raw):
         raise HTTPException(status_code=400, detail="Invalid Filters format.")
 
 
-@router.get("/", response_model=schemas.FabricListResponse)
+@router.get("", response_model=schemas.FabricListResponse)
 def get_fabrics(
     Filters:         Optional[str]  = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -39,7 +39,7 @@ def get_fabric(fabric_id: int, db: Session = Depends(get_db)):
     return result
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 def create_fabric(command: schemas.FabricCreate, db: Session = Depends(get_db)):
     return {"fabricId": repository.create_fabric(db, command)}
 

@@ -18,7 +18,7 @@ def _pf(Filters):
 
 
 # ── PUBLIC ────────────────────────────────────────────────────────────────────
-@router.get("/", response_model=schemas.CouponListResponse)
+@router.get("", response_model=schemas.CouponListResponse)
 def get_coupons(
     Filters: Optional[str] = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -65,7 +65,7 @@ def get_coupon(coupon_id: int, db: Session = Depends(get_db)):
 
 
 # ── LOGGED IN ─────────────────────────────────────────────────────────────────
-@router.post("/", response_model=schemas.CouponResponse, status_code=201,
+@router.post("", response_model=schemas.CouponResponse, status_code=201,
              dependencies=[Depends(get_current_user)])
 def create_coupon(coupon: schemas.CouponCreate, db: Session = Depends(get_db)):
     return repository.create_coupon(db, coupon.model_dump())

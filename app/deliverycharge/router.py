@@ -29,7 +29,7 @@ def parse_filters(raw):
         return parsed if isinstance(parsed, list) else [parsed]
     except: raise HTTPException(400, "Invalid Filters format.")
 
-@router.get("/", response_model=schemas.DeliveryChargeListResponse)
+@router.get("", response_model=schemas.DeliveryChargeListResponse)
 def get_list(
     Filters: Optional[str] = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -54,7 +54,7 @@ def get_detail(delivery_charge_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="DeliveryCharge not found.")
     return result
 
-@router.post("/", status_code=201, dependencies=[Depends(get_current_user)])
+@router.post("", status_code=201, dependencies=[Depends(get_current_user)])
 def create(command: schemas.DeliveryChargeCreate, db: Session = Depends(get_db)):
     return {"deliveryChargeId": repository.create(db, command)}
 

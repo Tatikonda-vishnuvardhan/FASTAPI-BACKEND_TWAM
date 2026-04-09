@@ -1,19 +1,20 @@
 from typing import Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import asc, desc, text
+from sqlalchemy import asc, desc
 from app.shared.filters import apply_filters, apply_ordering, apply_pagination, build_paged_response
 from .models import People
+from app.userrole.models import UserRole
 
 def _get_role(db: Session, role_id):
     if not role_id:
         return None
     try:
-        row = db.execute(
-            text('SELECT "RoleId", "RoleName" FROM twam."UserRole" WHERE "RoleId" = :id LIMIT 1'),
-            {"id": role_id}
-        ).fetchone()
-        if row:
-            return {"roleId": row[0], "roleName": row[1]}
+        role = db.query(UserRole).filter(
+            UserRole.UserRoleId == role_id,
+            UserRole.DeletedInd == False
+        ).first()
+        if role:
+            return {"roleId": role.UserRoleId, "roleName": role.RoleName}
     except Exception:
         pass
     return None

@@ -18,7 +18,7 @@ UPLOAD_DIR = "uploads"
 
 # ── PUBLIC: list / fetch brands (guests can browse) ───────────────────────────
 
-@router.get("/", response_model=schemas.BrandListResponse)
+@router.get("", response_model=schemas.BrandListResponse)
 def get_brands(
     Filters:         Optional[str]  = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),

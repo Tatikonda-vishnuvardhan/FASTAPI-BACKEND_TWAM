@@ -15,7 +15,7 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)]
 )
 
-@router.get("/")
+@router.get("")
 def get_notifications(
     Filters: Optional[str] = Query(None, alias="Filters"),
     Page_Index: Optional[int] = Query(None, alias="Page.Index", ge=1),

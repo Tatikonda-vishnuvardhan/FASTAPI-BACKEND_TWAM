@@ -9,7 +9,7 @@ from app.auth.dependencies import get_current_user, require_roles, Roles, Curren
 router = APIRouter(
     dependencies=[Depends(get_current_user)],prefix="/api/Stores", tags=["Stores"])
 
-@router.get("/", response_model=schemas.StoresListResponse)
+@router.get("", response_model=schemas.StoresListResponse)
 def get_list(
     Filters: Optional[str] = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -27,7 +27,7 @@ def get_detail(store_id: int, db: Session = Depends(get_db)):
     if not result: raise HTTPException(404, "Store not found.")
     return result
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 def create(command: schemas.StoresCreate, db: Session = Depends(get_db)):
     return {"storeId": repository.create(db, command)}
 

@@ -54,7 +54,7 @@ def get_cart_list(db: Session, filters, order_ascending, order_property, page_in
             ) AS image
         FROM twam."Cart" c
         LEFT JOIN twam."Products"             p   ON p."ProductId"               = c."ProductId"
-        LEFT JOIN mdm."brands"                b   ON b."brandId"                 = p."BrandId"
+        LEFT JOIN mdm."Brand"                 b   ON b."brandId"                 = p."BrandId"
         LEFT JOIN twam."ProductVariants"      pv  ON pv."ProductVariantId"       = c."ProductVariantId"
         LEFT JOIN twam."ProductVariantDetail" pvd ON pvd."ProductVariantDetailId" = c."ProductVariantDetailId"
         LEFT JOIN mdm."Size"                  s   ON s."SizeId"                  = pvd."Size"

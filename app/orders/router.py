@@ -22,7 +22,7 @@ def parse_filters(raw):
     except: raise HTTPException(400, "Invalid Filters format.")
 
 
-@router.get("/", response_model=schemas.OrderListResponse)
+@router.get("", response_model=schemas.OrderListResponse)
 def get_order_list(
     Filters: Optional[str] = Query(None, alias="Filters"),
     Order_Ascending: Optional[bool] = Query(None, alias="Order.Ascending"),
@@ -113,7 +113,7 @@ def checkout_summary(
         raise HTTPException(400, str(e))
 
 
-@router.post("/", response_model=schemas.OrderResponse, status_code=201)
+@router.post("", response_model=schemas.OrderResponse, status_code=201)
 def create_order(
     order: schemas.CreateOrderRequest,
     db: Session = Depends(get_db),
@@ -124,7 +124,14 @@ def create_order(
     try:
         return repository.create_order(db, order)
     except ValueError as e:
+        # Validation errors (out of stock, bad address, etc.) → 400
         raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        # ── FIX: PayG gateway errors were previously swallowed here,
+        # causing the order to appear "created" with paymentProcessUrl=null.
+        # Now we surface them as HTTP 502 so the frontend can show the real
+        # error message and prevent the user from thinking the order succeeded.
+        raise HTTPException(502, str(e))
 
 
 @router.post("/ReOrder")
@@ -156,7 +163,13 @@ def return_order(command: schemas.CreateReturnOrderRequest, db: Session = Depend
 # ── PUBLIC overrides ──────────────────────────────────────────────────────────
 @router.post("/GuestOrder", response_model=schemas.OrderResponse, status_code=201, dependencies=[])
 def guest_order(command: schemas.CreateGuestOrderRequest, db: Session = Depends(get_db)):
-    return repository.create_guest_order(db, command)
+    try:
+        return repository.create_guest_order(db, command)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        # Same PayG fix as create_order above
+        raise HTTPException(502, str(e))
 
 
 @router.put("/CheckOutOfStock", response_model=schemas.ValidationResponse, dependencies=[])
